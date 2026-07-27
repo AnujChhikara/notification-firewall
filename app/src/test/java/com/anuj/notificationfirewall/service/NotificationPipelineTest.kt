@@ -43,4 +43,15 @@ class NotificationPipelineTest {
         val r = pipeline(urgent = true).decide(n(), listOf(sleep), { emptyList() }, night)
         assertEquals(BucketAction.LET_THROUGH_AS_IS, r.bucket)
     }
+    @Test fun ambiguous_ask_ai_default_with_ai_disabled_resolves_to_silence_without_calling_ai() = runBlocking {
+        val throwingService = object : ImportanceService {
+            override suspend fun classify(n: IncomingNotification, profileName: String): Verdict =
+                throw AssertionError("ImportanceService must not be called when aiEnabled == false")
+        }
+        val pipeline = NotificationPipeline(ProfileManager(), RuleEngine(), throwingService)
+        val aiDisabledProfile = sleep.copy(aiEnabled = false)
+        val r = pipeline.decide(n(), listOf(aiDisabledProfile), { emptyList() }, night)
+        assertEquals(BucketAction.SILENCE, r.bucket)
+        assertEquals(DecisionSource.DEFAULT, r.source)
+    }
 }

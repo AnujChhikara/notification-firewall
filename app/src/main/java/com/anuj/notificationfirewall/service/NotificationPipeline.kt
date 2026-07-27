@@ -60,8 +60,16 @@ class NotificationPipeline(
                         matchedRuleId = null,
                     )
                 } else {
+                    // ASK_AI must never leak as a final bucket. If it is the literal
+                    // default but AI is not being consulted (aiEnabled == false),
+                    // resolve it to SILENCE.
+                    val resolved = if (profile.defaultAction == BucketAction.ASK_AI) {
+                        BucketAction.SILENCE
+                    } else {
+                        profile.defaultAction
+                    }
                     PipelineResult(
-                        bucket = profile.defaultAction,
+                        bucket = resolved,
                         source = DecisionSource.DEFAULT,
                         verdict = null,
                         activeProfileId = profile.id,
