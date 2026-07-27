@@ -61,8 +61,14 @@ class BucketExecutor(
     fun execute(result: PipelineResult, sbn: StatusBarNotification, soundConfig: SoundConfig?) {
         when (result.bucket) {
             BucketAction.LET_THROUGH_AS_IS -> {
-                // No-op: leave the original notification exactly as posted
-                // so its native actions (e.g. quick-reply) keep working.
+                // onNotificationPosted also fires for UPDATES to the same
+                // sbn.key. If an earlier update was bucketed SILENCE /
+                // CUSTOM_SOUND we created our own re-post for this key; clear
+                // it so the now-let-through original is not shadowed by a
+                // stale silenced copy. Idempotent no-op when none exists.
+                cancelOurRepost(sbn)
+                // Otherwise a no-op: leave the original notification exactly
+                // as posted so its native actions (e.g. quick-reply) work.
             }
 
             BucketAction.SILENCE -> {
@@ -75,9 +81,20 @@ class BucketExecutor(
                 // calls execute(); we only need to remove the notification
                 // from the tray, nothing is re-posted.
                 cancelOriginal(sbn)
+                // Also clear any re-post from an earlier update of this key
+                // (see LET_THROUGH_AS_IS) so CAPTURE truly leaves the tray
+                // empty for this notification. Idempotent.
+                cancelOurRepost(sbn)
             }
 
             BucketAction.LET_THROUGH_CUSTOM_SOUND -> {
+                if (soundConfig == null) {
+                    Log.w(
+                        TAG,
+                        "LET_THROUGH_CUSTOM_SOUND for ${sbn.key} arrived with no SoundConfig; " +
+                            "downgrading to the silent channel",
+                    )
+                }
                 cancelOriginal(sbn)
                 repost(sbn, channelManager.channelFor(sbn.packageName, soundConfig))
             }
@@ -94,6 +111,17 @@ class BucketExecutor(
                 repost(sbn, channelManager.channelFor(sbn.packageName, null))
             }
         }
+    }
+
+    /**
+     * Cancels any notification THIS app previously re-posted for [sbn]'s key.
+     * Used on bucket transitions (e.g. an update to a key previously bucketed
+     * SILENCE/CUSTOM_SOUND now resolves to CAPTURE or LET_THROUGH_AS_IS) so a
+     * stale re-post does not linger in the tray. Idempotent: a no-op when no
+     * prior re-post exists.
+     */
+    private fun cancelOurRepost(sbn: StatusBarNotification) {
+        notificationManager.cancel(sbn.key, REPOST_NOTIFICATION_ID)
     }
 
     private fun cancelOriginal(sbn: StatusBarNotification) {
