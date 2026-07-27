@@ -16,3 +16,6 @@ captures/
 
 # OS
 .DS_Store
+
+# SDD scratch workspace (git-ignored)
+.superpowers/
