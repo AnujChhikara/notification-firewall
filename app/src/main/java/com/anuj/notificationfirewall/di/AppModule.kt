@@ -17,6 +17,8 @@ import com.anuj.notificationfirewall.data.db.dao.RuleDao
 import com.anuj.notificationfirewall.data.prefs.SecurePrefs
 import com.anuj.notificationfirewall.domain.profile.ProfileManager
 import com.anuj.notificationfirewall.domain.rules.RuleEngine
+import com.anuj.notificationfirewall.service.BucketExecutor
+import com.anuj.notificationfirewall.service.ChannelManager
 import com.anuj.notificationfirewall.service.NotificationPipeline
 import dagger.Module
 import dagger.Provides
@@ -110,4 +112,16 @@ object AppModule {
         ruleEngine: RuleEngine,
         importanceService: ImportanceService
     ): NotificationPipeline = NotificationPipeline(profileManager, ruleEngine, importanceService)
+
+    @Provides
+    @Singleton
+    fun provideChannelManager(@ApplicationContext context: Context): ChannelManager =
+        ChannelManager(context)
+
+    @Provides
+    @Singleton
+    fun provideBucketExecutor(
+        @ApplicationContext context: Context,
+        channelManager: ChannelManager,
+    ): BucketExecutor = BucketExecutor(context, channelManager)
 }

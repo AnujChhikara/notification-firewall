@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Required (Android 13+) to post the re-posted SILENCE / CUSTOM_SOUND
+         notifications from BucketExecutor. Runtime request of this
+         permission is wired up by the onboarding/settings UI task; this
+         manifest declaration is what BucketExecutor's notify() calls need
+         to be valid regardless of when the user grants it. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:name=".NfApplication"
         android:allowBackup="false"
