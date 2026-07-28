@@ -162,8 +162,9 @@ fun ProfileEditScreen(nav: NavHostController, profileId: Long, vm: ProfilesViewM
                 }
             }
             Text(
-                "Auto-DND silences everything through the system while this profile is on; only " +
-                    "your ring-through rules make a sound. Needs DND access.",
+                "Auto-DND silences app notifications through the system while this profile is " +
+                    "on — but phone calls, repeat callers and alarms always come through, and so " +
+                    "do your ring-through rules. Needs DND access.",
                 style = MaterialTheme.typography.labelSmall, color = NfTextFaint,
                 modifier = Modifier.padding(horizontal = 4.dp),
             )

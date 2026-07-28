@@ -40,8 +40,35 @@ class SecurePrefs(private val prefs: SharedPreferences) {
         get() = prefs.getBoolean(KEY_DND_SET_BY_APP, false)
         set(value) = prefs.edit { putBoolean(KEY_DND_SET_BY_APP, value) }
 
+    // The user's own DND policy, captured before we overwrite it with our
+    // call-safe policy, so we can restore it exactly when we turn DND back off.
+    var hasSavedDndPolicy: Boolean
+        get() = prefs.getBoolean(KEY_HAS_SAVED_DND_POLICY, false)
+        set(value) = prefs.edit { putBoolean(KEY_HAS_SAVED_DND_POLICY, value) }
+
+    var savedDndCategories: Int
+        get() = prefs.getInt(KEY_DND_CATEGORIES, 0)
+        set(value) = prefs.edit { putInt(KEY_DND_CATEGORIES, value) }
+
+    var savedDndCallSenders: Int
+        get() = prefs.getInt(KEY_DND_CALL_SENDERS, 0)
+        set(value) = prefs.edit { putInt(KEY_DND_CALL_SENDERS, value) }
+
+    var savedDndMessageSenders: Int
+        get() = prefs.getInt(KEY_DND_MSG_SENDERS, 0)
+        set(value) = prefs.edit { putInt(KEY_DND_MSG_SENDERS, value) }
+
+    var savedDndSuppressedEffects: Int
+        get() = prefs.getInt(KEY_DND_SUPPRESSED, 0)
+        set(value) = prefs.edit { putInt(KEY_DND_SUPPRESSED, value) }
+
     private companion object {
         const val KEY_OPENAI_API_KEY = "openai_api_key"
         const val KEY_DND_SET_BY_APP = "dnd_set_by_app"
+        const val KEY_HAS_SAVED_DND_POLICY = "dnd_has_saved_policy"
+        const val KEY_DND_CATEGORIES = "dnd_saved_categories"
+        const val KEY_DND_CALL_SENDERS = "dnd_saved_call_senders"
+        const val KEY_DND_MSG_SENDERS = "dnd_saved_msg_senders"
+        const val KEY_DND_SUPPRESSED = "dnd_saved_suppressed"
     }
 }
