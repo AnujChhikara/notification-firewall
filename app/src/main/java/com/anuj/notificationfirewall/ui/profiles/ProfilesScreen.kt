@@ -62,7 +62,6 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.DayOfWeek
-import java.time.ZonedDateTime
 import javax.inject.Inject
 
 @HiltViewModel
@@ -108,7 +107,7 @@ fun ProfilesScreen(nav: NavHostController, vm: ProfilesViewModel = hiltViewModel
                         }
                         Text(
                             "${fmt(p.startMinuteOfDay)}–${fmt(p.endMinuteOfDay)} · default ${p.defaultAction}" +
-                                (if (p.autoDnd) " · Auto-DND" else "") + (if (p.aiEnabled) " · AI" else ""),
+                                (if (p.autoDnd) " · Silenced" else "") + (if (p.aiEnabled) " · AI" else ""),
                             style = MaterialTheme.typography.bodyMedium,
                             color = NfTextMuted,
                         )
@@ -156,14 +155,14 @@ fun ProfileEditScreen(nav: NavHostController, profileId: Long, vm: ProfilesViewM
             NfCard {
                 Column(Modifier.padding(vertical = 4.dp, horizontal = 16.dp)) {
                     ToggleRow("Enabled", enabled) { enabled = it }
-                    ToggleRow("Auto Do-Not-Disturb while active", autoDnd) { autoDnd = it }
+                    ToggleRow("Silence notifications while active", autoDnd) { autoDnd = it }
                     ToggleRow("AI triage (Ask-AI default)", aiEnabled) { aiEnabled = it }
                 }
             }
             Text(
-                "Auto-DND silences app notifications through the system while this profile is " +
-                    "on — but phone calls, repeat callers and alarms always come through, and so " +
-                    "do your ring-through rules. Needs DND access.",
+                "Mutes app notifications while this profile is on — phone calls, repeat callers " +
+                    "and alarms always ring, and so do your ring-through rules. Needs the " +
+                    "\"Silence access\" grant.",
                 style = MaterialTheme.typography.labelSmall, color = NfTextFaint,
                 modifier = Modifier.padding(horizontal = 4.dp),
             )

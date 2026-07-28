@@ -99,7 +99,7 @@ fun SettingsScreen(nav: NavHostController, vm: SettingsViewModel = hiltViewModel
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     StatusLine("Notification access", status.notificationAccess)
                     StatusLine("Post notifications", status.postNotifications)
-                    StatusLine("DND override", status.dndAccess)
+                    StatusLine("Silence access", status.dndAccess)
                     StatusLine("Contacts", status.contacts)
                     StatusLine("Battery exemption", status.batteryExempt)
                     StatusLine("Alarms & reminders", status.exactAlarms)

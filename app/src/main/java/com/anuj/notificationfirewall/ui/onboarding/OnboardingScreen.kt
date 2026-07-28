@@ -94,9 +94,11 @@ fun OnboardingScreen(nav: NavHostController) {
             }
 
             Step(
-                "DND override", false,
-                "Needed for auto-DND: lets your ring-through rules sound while everything else stays silent.",
-                status.dndAccess, "Open DND access",
+                "Silence access", false,
+                "Lets a profile mute app notifications while keeping calls, repeat callers and " +
+                    "alarms ringing. (Uses Do Not Disturb under the hood; your DND settings are " +
+                    "saved and restored.)",
+                status.dndAccess, "Grant silence access",
             ) { runCatching { context.startActivity(Permissions.dndAccessIntent()) } }
 
             Step(
