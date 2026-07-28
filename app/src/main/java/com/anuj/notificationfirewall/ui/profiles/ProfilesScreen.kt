@@ -40,8 +40,8 @@ import com.anuj.notificationfirewall.data.db.ProfileEntity
 import com.anuj.notificationfirewall.data.db.dao.ProfileDao
 import com.anuj.notificationfirewall.data.mapper.toActiveProfile
 import com.anuj.notificationfirewall.domain.model.BucketAction
-import com.anuj.notificationfirewall.domain.profile.ProfileManager
-import com.anuj.notificationfirewall.service.DndController
+import com.anuj.notificationfirewall.service.ProfileStateReconciler
+import com.anuj.notificationfirewall.work.ProfileScheduler
 import com.anuj.notificationfirewall.ui.NfButton
 import com.anuj.notificationfirewall.ui.NfCard
 import com.anuj.notificationfirewall.ui.NfChip
@@ -69,8 +69,8 @@ import javax.inject.Inject
 class ProfilesViewModel @Inject constructor(
     private val profileDao: ProfileDao,
     private val digestScheduler: com.anuj.notificationfirewall.work.DigestScheduler,
-    private val profileManager: ProfileManager,
-    private val dndController: DndController,
+    private val profileScheduler: ProfileScheduler,
+    private val reconciler: ProfileStateReconciler,
 ) : ViewModel() {
 
     val profiles = profileDao.observeProfiles()
@@ -83,11 +83,10 @@ class ProfilesViewModel @Inject constructor(
             val id = profileDao.upsert(entity)
             val stored = profileDao.profileById(id) ?: entity
             digestScheduler.scheduleForProfile(stored.toActiveProfile())
-            val active = profileManager.activeProfile(
-                profileDao.enabledProfiles().map { it.toActiveProfile() },
-                ZonedDateTime.now(),
-            )
-            dndController.reconcile(active)
+            // Window times may have changed: re-arm the boundary alarm and reflect
+            // the new state on the phone right away (foreground → may start FGS).
+            profileScheduler.rescheduleAll()
+            reconciler.reconcileFromDb(canStartForeground = true)
         }
     }
 }

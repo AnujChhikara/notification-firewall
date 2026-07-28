@@ -102,6 +102,7 @@ fun SettingsScreen(nav: NavHostController, vm: SettingsViewModel = hiltViewModel
                     StatusLine("DND override", status.dndAccess)
                     StatusLine("Contacts", status.contacts)
                     StatusLine("Battery exemption", status.batteryExempt)
+                    StatusLine("Alarms & reminders", status.exactAlarms)
                     NfButton(
                         "Request battery exemption",
                         primary = false,

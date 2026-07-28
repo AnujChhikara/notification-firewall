@@ -111,6 +111,15 @@ fun OnboardingScreen(nav: NavHostController) {
                 status.batteryExempt, "Request exemption",
             ) { runCatching { context.startActivity(Permissions.batteryExemptionIntent(context)) } }
 
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                Step(
+                    "Alarms & reminders", false,
+                    "Recommended. Lets profiles start and stop exactly on time and keeps the " +
+                        "firewall reliably active during their windows.",
+                    status.exactAlarms, "Allow alarms & reminders",
+                ) { runCatching { context.startActivity(Permissions.exactAlarmSettingsIntent(context)) } }
+            }
+
             NfCard {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("OpenAI API key", style = MaterialTheme.typography.titleMedium, color = NfTitle)

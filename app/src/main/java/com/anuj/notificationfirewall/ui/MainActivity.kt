@@ -23,6 +23,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.anuj.notificationfirewall.data.seed.DefaultSeeder
+import com.anuj.notificationfirewall.service.HealthMonitor
+import com.anuj.notificationfirewall.service.ProfileStateReconciler
+import com.anuj.notificationfirewall.work.ProfileScheduler
 import com.anuj.notificationfirewall.ui.analytics.AnalyticsScreen
 import com.anuj.notificationfirewall.ui.digest.DigestScreen
 import com.anuj.notificationfirewall.ui.home.HomeScreen
@@ -57,10 +60,20 @@ object Routes {
 @HiltViewModel
 class MainViewModel @Inject constructor(
     private val seeder: DefaultSeeder,
+    private val scheduler: ProfileScheduler,
+    private val reconciler: ProfileStateReconciler,
+    private val healthMonitor: HealthMonitor,
 ) : ViewModel() {
     init {
-        // First-run seed of the Sleep profile + rule table (design §7).
-        viewModelScope.launch { seeder.seedIfEmpty() }
+        viewModelScope.launch {
+            // First-run seed of the Sleep profile + rule table (design §7), then
+            // arm the reliability machinery. The app is in the foreground here, so
+            // we may start the keep-alive service if a window is already active.
+            seeder.seedIfEmpty()
+            scheduler.rescheduleAll()
+            reconciler.reconcileFromDb(canStartForeground = true)
+            healthMonitor.refresh()
+        }
     }
 }
 

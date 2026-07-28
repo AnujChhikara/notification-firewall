@@ -3,7 +3,7 @@ package com.anuj.notificationfirewall
 import android.app.Application
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
-import com.anuj.notificationfirewall.work.DndReconcileWorker
+import com.anuj.notificationfirewall.work.MaintenanceWorker
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
 
@@ -22,7 +22,7 @@ class NfApplication : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
-        // Keep DND in sync with the active profile even on an idle phone.
-        DndReconcileWorker.schedule(this)
+        // Periodic safety net: reconcile state, re-arm alarms, health-check.
+        MaintenanceWorker.schedule(this)
     }
 }

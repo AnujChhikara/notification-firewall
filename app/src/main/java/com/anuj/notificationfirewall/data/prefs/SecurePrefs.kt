@@ -62,6 +62,17 @@ class SecurePrefs(private val prefs: SharedPreferences) {
         get() = prefs.getInt(KEY_DND_SUPPRESSED, 0)
         set(value) = prefs.edit { putInt(KEY_DND_SUPPRESSED, value) }
 
+    /** Whether the notification listener is currently bound/connected. */
+    var listenerConnected: Boolean
+        get() = prefs.getBoolean(KEY_LISTENER_CONNECTED, false)
+        set(value) = prefs.edit { putBoolean(KEY_LISTENER_CONNECTED, value) }
+
+    /** True once the listener has connected at least once (suppresses a false
+     *  "stopped" alert during first-run before access is granted). */
+    var everConnected: Boolean
+        get() = prefs.getBoolean(KEY_EVER_CONNECTED, false)
+        set(value) = prefs.edit { putBoolean(KEY_EVER_CONNECTED, value) }
+
     private companion object {
         const val KEY_OPENAI_API_KEY = "openai_api_key"
         const val KEY_DND_SET_BY_APP = "dnd_set_by_app"
@@ -70,5 +81,7 @@ class SecurePrefs(private val prefs: SharedPreferences) {
         const val KEY_DND_CALL_SENDERS = "dnd_saved_call_senders"
         const val KEY_DND_MSG_SENDERS = "dnd_saved_msg_senders"
         const val KEY_DND_SUPPRESSED = "dnd_saved_suppressed"
+        const val KEY_LISTENER_CONNECTED = "listener_connected"
+        const val KEY_EVER_CONNECTED = "ever_connected"
     }
 }

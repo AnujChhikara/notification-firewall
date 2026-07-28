@@ -29,6 +29,10 @@ import com.anuj.notificationfirewall.data.db.dao.ProfileDao
 import com.anuj.notificationfirewall.data.mapper.toActiveProfile
 import com.anuj.notificationfirewall.data.prefs.SecurePrefs
 import com.anuj.notificationfirewall.domain.profile.ProfileManager
+import com.anuj.notificationfirewall.service.HealthEvaluator
+import com.anuj.notificationfirewall.service.HealthFlags
+import com.anuj.notificationfirewall.service.HealthLevel
+import com.anuj.notificationfirewall.ui.NfButton
 import com.anuj.notificationfirewall.ui.NfCard
 import com.anuj.notificationfirewall.ui.NfRow
 import com.anuj.notificationfirewall.ui.NfScreen
@@ -38,7 +42,13 @@ import com.anuj.notificationfirewall.ui.StatusDot
 import com.anuj.notificationfirewall.ui.bucketColor
 import com.anuj.notificationfirewall.ui.bucketLabel
 import com.anuj.notificationfirewall.ui.permissions.Permissions
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import com.anuj.notificationfirewall.ui.theme.NfAccent
+import com.anuj.notificationfirewall.ui.theme.NfCaptured
+import com.anuj.notificationfirewall.ui.theme.NfDanger
 import com.anuj.notificationfirewall.ui.theme.NfRang
 import com.anuj.notificationfirewall.ui.theme.NfText
 import com.anuj.notificationfirewall.ui.theme.NfTextMuted
@@ -66,6 +76,7 @@ class HomeViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val hasApiKey: Boolean get() = securePrefs.hasKey
+    val listenerConnected: Boolean get() = securePrefs.listenerConnected
 
     fun activeProfileName(all: List<ProfileEntity>): String? =
         profileManager.activeProfile(
@@ -81,6 +92,19 @@ fun HomeScreen(nav: NavHostController, vm: HomeViewModel = hiltViewModel()) {
     val recent by vm.recent.collectAsStateWithLifecycle()
     val status = remember(profiles) { Permissions.status(context, vm.hasApiKey) }
     val activeName = remember(profiles) { vm.activeProfileName(profiles) }
+    val health = remember(profiles) {
+        HealthEvaluator.evaluate(
+            HealthFlags(
+                notificationAccess = status.notificationAccess,
+                listenerConnected = vm.listenerConnected,
+                postNotifications = status.postNotifications,
+                needsDndAccess = profiles.any { it.autoDnd },
+                dndAccess = status.dndAccess,
+                batteryExempt = status.batteryExempt,
+                exactAlarms = status.exactAlarms,
+            ),
+        )
+    }
 
     NfScreen(eyebrow = "Notification Firewall", title = if (status.coreReady) "Armed" else "Setup needed") { modifier ->
         LazyColumn(
@@ -88,6 +112,9 @@ fun HomeScreen(nav: NavHostController, vm: HomeViewModel = hiltViewModel()) {
             verticalArrangement = Arrangement.spacedBy(4.dp),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 100.dp),
         ) {
+            if (health.level != HealthLevel.HEALTHY) {
+                item { HealthBanner(health.level, health.reason) { nav.navigate(Routes.ONBOARDING) } }
+            }
             item {
                 NfCard {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -147,4 +174,32 @@ private fun RecentRow(rec: NotificationRecordEntity) {
         subtitle = "${rec.appLabel} · ${bucketLabel(rec.bucket)}",
         dotColor = bucketColor(rec.bucket),
     )
+}
+
+@Composable
+private fun HealthBanner(level: HealthLevel, reason: String?, onFix: () -> Unit) {
+    val broken = level == HealthLevel.BROKEN
+    val accent = if (broken) NfDanger else NfCaptured
+    val shape = RoundedCornerShape(14.dp)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp)
+            .clip(shape)
+            .background(accent.copy(alpha = 0.12f))
+            .border(1.dp, accent.copy(alpha = 0.5f), shape)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatusDot(accent, size = 9.dp)
+            Text(
+                if (broken) "Firewall isn't running" else "Firewall is limited",
+                style = MaterialTheme.typography.titleMedium,
+                color = NfTitle,
+            )
+        }
+        reason?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = NfText) }
+        NfButton(if (broken) "Fix now" else "Review", onClick = onFix, primary = broken)
+    }
 }
