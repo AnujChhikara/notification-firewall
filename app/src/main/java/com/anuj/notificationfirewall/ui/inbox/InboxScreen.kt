@@ -25,9 +25,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.anuj.notificationfirewall.data.db.NotificationRecordEntity
 import com.anuj.notificationfirewall.data.db.dao.NotificationDao
+import com.anuj.notificationfirewall.domain.model.BucketAction
 import com.anuj.notificationfirewall.ui.NfScreen
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -37,7 +39,10 @@ class InboxViewModel @Inject constructor(
     private val notificationDao: NotificationDao,
 ) : ViewModel() {
 
-    val records = notificationDao.observeCaptured()
+    // The listener logs every notification; the Inbox shows only the ones we
+    // actually held back (Captured or Silenced).
+    val records = notificationDao.observeAll()
+        .map { all -> all.filter { it.bucket == BucketAction.CAPTURE || it.bucket == BucketAction.SILENCE } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun markRead(id: Long) {

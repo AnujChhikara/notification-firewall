@@ -1,0 +1,17 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Shield (firewall) with a check mark; sits inside the adaptive-icon
+         safe zone (~inner 66dp of the 108dp canvas). -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,30 L76,39 L76,57 C76,70 66,80 54,85 C42,80 32,70 32,57 L32,39 Z" />
+    <path
+        android:strokeColor="#2E5AAC"
+        android:strokeWidth="6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M44,57 L51,64 L65,48" />
+</vector>

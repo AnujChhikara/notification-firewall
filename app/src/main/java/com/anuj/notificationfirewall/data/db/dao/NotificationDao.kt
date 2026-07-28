@@ -12,7 +12,7 @@ interface NotificationDao {
     suspend fun insert(rec: NotificationRecordEntity): Long
 
     @Query("SELECT * FROM notifications ORDER BY timestampEpochMs DESC")
-    fun observeCaptured(): Flow<List<NotificationRecordEntity>>
+    fun observeAll(): Flow<List<NotificationRecordEntity>>
 
     @Query("SELECT * FROM notifications WHERE timestampEpochMs BETWEEN :startMs AND :endMs ORDER BY timestampEpochMs")
     suspend fun recordsBetween(startMs: Long, endMs: Long): List<NotificationRecordEntity>

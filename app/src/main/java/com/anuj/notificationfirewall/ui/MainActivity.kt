@@ -18,6 +18,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.anuj.notificationfirewall.data.seed.DefaultSeeder
+import com.anuj.notificationfirewall.ui.analytics.AnalyticsScreen
 import com.anuj.notificationfirewall.ui.digest.DigestScreen
 import com.anuj.notificationfirewall.ui.home.HomeScreen
 import com.anuj.notificationfirewall.ui.inbox.InboxScreen
@@ -37,6 +38,7 @@ object Routes {
     const val HOME = "home"
     const val ONBOARDING = "onboarding"
     const val INBOX = "inbox"
+    const val ANALYTICS = "analytics"
     const val PROFILES = "profiles"
     const val SETTINGS = "settings"
     const val DIGEST = "digest"
@@ -86,6 +88,7 @@ private fun NfNavGraph(nav: NavHostController) {
         composable(Routes.HOME) { HomeScreen(nav) }
         composable(Routes.ONBOARDING) { OnboardingScreen(nav) }
         composable(Routes.INBOX) { InboxScreen(nav) }
+        composable(Routes.ANALYTICS) { AnalyticsScreen(nav) }
         composable(Routes.PROFILES) { ProfilesScreen(nav) }
         composable(Routes.SETTINGS) { SettingsScreen(nav) }
         composable(Routes.DIGEST) { DigestScreen(nav) }

@@ -10,7 +10,6 @@ import com.anuj.notificationfirewall.data.db.dao.ProfileDao
 import com.anuj.notificationfirewall.data.db.dao.RuleDao
 import com.anuj.notificationfirewall.data.mapper.toActiveProfile
 import com.anuj.notificationfirewall.data.mapper.toRule
-import com.anuj.notificationfirewall.domain.model.BucketAction
 import com.anuj.notificationfirewall.domain.profile.ActiveProfile
 import com.anuj.notificationfirewall.domain.rules.Rule
 import dagger.hilt.android.AndroidEntryPoint
@@ -95,30 +94,28 @@ class NfListenerService : NotificationListenerService() {
             at = ZonedDateTime.now(),
         )
 
-        // Persist only the buckets the inbox / wake-up digest care about
-        // (CAPTURE + SILENCE); NotificationDao.observeCaptured() is unfiltered,
-        // so recording pass-through / let-through notifications would pollute it.
+        // Log EVERY notification we see (design §6/§7), including pass-through and
+        // let-through, so the analytics history stays complete. The Inbox filters
+        // this down to Captured/Silenced for display; Analytics queries all of it.
         // Must happen before execute(): the CAPTURE branch only removes the
         // notification from the tray and relies on the record already existing.
-        if (result.bucket == BucketAction.CAPTURE || result.bucket == BucketAction.SILENCE) {
-            notificationDao.insert(
-                NotificationRecordEntity(
-                    packageName = incoming.packageName,
-                    appLabel = incoming.appLabel,
-                    title = incoming.title,
-                    text = incoming.text,
-                    timestampEpochMs = sbn.postTime,
-                    senderKey = incoming.senderKey.ifBlank { null },
-                    activeProfileId = result.activeProfileId,
-                    matchedRuleId = result.matchedRuleId,
-                    decisionSource = result.source,
-                    bucket = result.bucket,
-                    aiUrgent = result.verdict?.urgent,
-                    aiReason = result.verdict?.reason,
-                    isRead = false,
-                ),
-            )
-        }
+        notificationDao.insert(
+            NotificationRecordEntity(
+                packageName = incoming.packageName,
+                appLabel = incoming.appLabel,
+                title = incoming.title,
+                text = incoming.text,
+                timestampEpochMs = sbn.postTime,
+                senderKey = incoming.senderKey.ifBlank { null },
+                activeProfileId = result.activeProfileId,
+                matchedRuleId = result.matchedRuleId,
+                decisionSource = result.source,
+                bucket = result.bucket,
+                aiUrgent = result.verdict?.urgent,
+                aiReason = result.verdict?.reason,
+                isRead = false,
+            ),
+        )
 
         // soundConfig is null for M1: no CUSTOM_SOUND rules can be authored until
         // the rule-builder UI (and its SoundConfig persistence) lands, and there

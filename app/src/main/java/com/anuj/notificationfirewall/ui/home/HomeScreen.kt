@@ -50,7 +50,7 @@ class HomeViewModel @Inject constructor(
     val profiles = profileDao.observeProfiles()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val recent = notificationDao.observeCaptured()
+    val recent = notificationDao.observeAll()
         .map { it.take(10) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -105,6 +105,7 @@ fun HomeScreen(nav: NavHostController, vm: HomeViewModel = hiltViewModel()) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { nav.navigate(Routes.INBOX) }, Modifier.fillMaxWidth()) { Text("Inbox") }
+                    Button(onClick = { nav.navigate(Routes.ANALYTICS) }, Modifier.fillMaxWidth()) { Text("Analytics") }
                     Button(onClick = { nav.navigate(Routes.PROFILES) }, Modifier.fillMaxWidth()) { Text("Profiles & rules") }
                     Button(onClick = { nav.navigate(Routes.DIGEST) }, Modifier.fillMaxWidth()) { Text("Wake-up digest") }
                     Button(onClick = { nav.navigate(Routes.SETTINGS) }, Modifier.fillMaxWidth()) { Text("Settings") }
