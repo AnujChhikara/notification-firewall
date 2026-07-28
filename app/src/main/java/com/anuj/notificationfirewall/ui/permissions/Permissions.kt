@@ -2,6 +2,7 @@
 package com.anuj.notificationfirewall.ui.permissions
 
 import android.Manifest
+import android.app.AlarmManager
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
@@ -13,13 +14,14 @@ import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 
-/** Snapshot of the five M1 grants (design §10). */
+/** Snapshot of the grants the firewall relies on (design §10 + reliability). */
 data class PermissionStatus(
     val notificationAccess: Boolean,
     val dndAccess: Boolean,
     val contacts: Boolean,
     val postNotifications: Boolean,
     val batteryExempt: Boolean,
+    val exactAlarms: Boolean,
     val hasApiKey: Boolean,
 ) {
     /** The two that actually gate a working firewall. */
@@ -53,14 +55,31 @@ object Permissions {
         context.getSystemService(PowerManager::class.java)
             ?.isIgnoringBatteryOptimizations(context.packageName) == true
 
+    fun exactAlarmsAllowed(context: Context): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            context.getSystemService(AlarmManager::class.java)?.canScheduleExactAlarms() == true
+        } else {
+            true
+        }
+
     fun status(context: Context, hasApiKey: Boolean): PermissionStatus = PermissionStatus(
         notificationAccess = notificationAccessGranted(context),
         dndAccess = dndAccessGranted(context),
         contacts = contactsGranted(context),
         postNotifications = postNotificationsGranted(context),
         batteryExempt = batteryExempt(context),
+        exactAlarms = exactAlarmsAllowed(context),
         hasApiKey = hasApiKey,
     )
+
+    fun exactAlarmSettingsIntent(context: Context): Intent =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
+                .setData(Uri.parse("package:${context.packageName}"))
+        } else {
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                .setData(Uri.parse("package:${context.packageName}"))
+        }
 
     fun notificationAccessIntent(): Intent =
         Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
