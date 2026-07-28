@@ -16,8 +16,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,16 +27,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.anuj.notificationfirewall.R
 import com.anuj.notificationfirewall.domain.model.BucketAction
 import com.anuj.notificationfirewall.ui.theme.NfAccent
+import com.anuj.notificationfirewall.ui.theme.NfAccentSoft
 import com.anuj.notificationfirewall.ui.theme.NfBackground
+import com.anuj.notificationfirewall.ui.theme.NfBorder
 import com.anuj.notificationfirewall.ui.theme.NfBorderSubtle
 import com.anuj.notificationfirewall.ui.theme.NfCaptured
 import com.anuj.notificationfirewall.ui.theme.NfRang
 import com.anuj.notificationfirewall.ui.theme.NfSilenced
 import com.anuj.notificationfirewall.ui.theme.NfSurface
+import com.anuj.notificationfirewall.ui.theme.NfSurfaceElevated
 import com.anuj.notificationfirewall.ui.theme.NfText
 import com.anuj.notificationfirewall.ui.theme.NfTextFaint
 import com.anuj.notificationfirewall.ui.theme.NfTextMuted
@@ -157,6 +164,103 @@ fun SectionLabel(text: String, modifier: Modifier = Modifier) {
         color = NfTextFaint,
         modifier = modifier.padding(start = 8.dp, top = 8.dp, bottom = 2.dp),
     )
+}
+
+/** Primary (accent-filled) or secondary (bordered surface) action button. */
+@Composable
+fun NfButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    primary: Boolean = true,
+    enabled: Boolean = true,
+) {
+    val shape = RoundedCornerShape(10.dp)
+    val bg = when {
+        !enabled -> NfSurface
+        primary -> NfAccent
+        else -> NfSurface
+    }
+    val fg = when {
+        !enabled -> NfTextFaint
+        primary -> NfTitle
+        else -> NfText
+    }
+    Box(
+        modifier
+            .clip(shape)
+            .background(bg)
+            .then(if (!primary) Modifier.border(1.dp, NfBorder, shape) else Modifier)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, style = MaterialTheme.typography.labelLarge, color = fg)
+    }
+}
+
+/** Selectable pill (replaces Material FilterChip in the app's dark language). */
+@Composable
+fun NfChip(text: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(8.dp)
+    Box(
+        modifier
+            .clip(shape)
+            .background(if (selected) NfAccentSoft else NfSurface)
+            .border(1.dp, if (selected) NfAccent else NfBorder, shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelMedium,
+            color = if (selected) NfText else NfTextMuted,
+        )
+    }
+}
+
+data class NfNavItem(val route: String, val iconRes: Int, val label: String)
+
+val NfNavItems = listOf(
+    NfNavItem(Routes.HOME, R.drawable.ic_nav_home, "Home"),
+    NfNavItem(Routes.INBOX, R.drawable.ic_nav_inbox, "Inbox"),
+    NfNavItem(Routes.ANALYTICS, R.drawable.ic_nav_analytics, "Analytics"),
+    NfNavItem(Routes.SETTINGS, R.drawable.ic_nav_settings, "Settings"),
+)
+
+/** Floating pill navigation for the primary destinations. */
+@Composable
+fun NfBottomBar(currentRoute: String?, onSelect: (String) -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        modifier
+            .navigationBarsPadding()
+            .padding(bottom = 14.dp)
+            .clip(RoundedCornerShape(26.dp))
+            .background(NfSurfaceElevated)
+            .border(1.dp, NfBorder, RoundedCornerShape(26.dp))
+            .padding(horizontal = 6.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        NfNavItems.forEach { item ->
+            val selected = currentRoute == item.route
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(if (selected) NfAccentSoft else Color.Transparent)
+                    .clickable { onSelect(item.route) }
+                    .padding(horizontal = 16.dp, vertical = 9.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    painter = painterResource(item.iconRes),
+                    contentDescription = item.label,
+                    tint = if (selected) NfText else NfTextMuted,
+                    modifier = Modifier.size(21.dp),
+                )
+            }
+        }
+    }
 }
 
 fun bucketColor(bucket: BucketAction): Color = when (bucket) {

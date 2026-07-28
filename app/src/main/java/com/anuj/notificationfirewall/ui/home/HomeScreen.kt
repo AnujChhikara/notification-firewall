@@ -86,7 +86,7 @@ fun HomeScreen(nav: NavHostController, vm: HomeViewModel = hiltViewModel()) {
         LazyColumn(
             modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 32.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 100.dp),
         ) {
             item {
                 NfCard {

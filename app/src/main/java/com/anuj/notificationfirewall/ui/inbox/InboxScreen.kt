@@ -76,7 +76,7 @@ fun InboxScreen(nav: NavHostController, vm: InboxViewModel = hiltViewModel()) {
         }
         LazyColumn(
             modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            contentPadding = PaddingValues(bottom = 32.dp),
+            contentPadding = PaddingValues(bottom = 100.dp),
         ) {
             items(records) { rec -> InboxRow(rec) { vm.markRead(rec.id) } }
         }

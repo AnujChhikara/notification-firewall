@@ -7,9 +7,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
@@ -17,6 +20,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.anuj.notificationfirewall.data.seed.DefaultSeeder
 import com.anuj.notificationfirewall.ui.analytics.AnalyticsScreen
@@ -86,7 +90,28 @@ private fun NfApp(
     @Suppress("UNUSED_PARAMETER") mainViewModel: MainViewModel = hiltViewModel(),
 ) {
     val nav = rememberNavController()
-    NfNavGraph(nav)
+    val currentRoute by nav.currentBackStackEntryAsState()
+    val route = currentRoute?.destination?.route
+    val primaryRoutes = setOf(Routes.HOME, Routes.INBOX, Routes.ANALYTICS, Routes.SETTINGS)
+
+    Box(Modifier.fillMaxSize()) {
+        NfNavGraph(nav)
+        if (route in primaryRoutes) {
+            NfBottomBar(
+                currentRoute = route,
+                onSelect = { dest ->
+                    if (dest != route) {
+                        nav.navigate(dest) {
+                            popUpTo(Routes.HOME) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                },
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        }
+    }
 }
 
 @Composable

@@ -3,17 +3,16 @@ package com.anuj.notificationfirewall.ui.analytics
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
@@ -22,7 +21,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.anuj.notificationfirewall.data.db.NotificationRecordEntity
 import com.anuj.notificationfirewall.data.db.dao.NotificationDao
+import com.anuj.notificationfirewall.ui.NfCard
 import com.anuj.notificationfirewall.ui.NfScreen
+import com.anuj.notificationfirewall.ui.SectionLabel
+import com.anuj.notificationfirewall.ui.theme.NfText
+import com.anuj.notificationfirewall.ui.theme.NfTextMuted
+import com.anuj.notificationfirewall.ui.theme.NfTitle
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
@@ -57,8 +61,8 @@ private fun List<NotificationRecordEntity>.toAnalytics(): AnalyticsState {
         total = size,
         byBucket = countBy { it.bucket },
         bySource = countBy { it.decisionSource },
-        topApps = countBy { it.appLabel }.take(10),
-        topSenders = countBy { it.senderKey ?: "(unknown)" }.take(10),
+        topApps = countBy { it.appLabel }.take(8),
+        topSenders = countBy { it.senderKey ?: "Unknown" }.take(8),
     )
 }
 
@@ -66,46 +70,55 @@ private fun List<NotificationRecordEntity>.toAnalytics(): AnalyticsState {
 fun AnalyticsScreen(nav: NavHostController, vm: AnalyticsViewModel = hiltViewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
 
-    NfScreen(title = "Analytics", onBack = { nav.popBackStack() }) { modifier ->
+    NfScreen(eyebrow = "What's coming in", title = "Analytics", onBack = { nav.popBackStack() }) { modifier ->
         LazyColumn(
-            modifier = modifier.fillMaxWidth().padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(top = 4.dp, bottom = 100.dp),
         ) {
             item {
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("${state.total}", style = MaterialTheme.typography.headlineMedium)
-                        Text("notifications seen so far", style = MaterialTheme.typography.bodyMedium)
+                NfCard {
+                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("${state.total}", style = MaterialTheme.typography.displaySmall, color = NfTitle)
+                        Text("notifications seen", style = MaterialTheme.typography.bodyMedium, color = NfTextMuted)
                     }
                 }
             }
             if (state.total == 0) {
                 item {
                     Text(
-                        "No data yet. Once the listener is running and a profile is " +
-                            "active, every notification is logged here.",
+                        "No data yet. Once the listener is running, every notification is logged here.",
                         style = MaterialTheme.typography.bodyMedium,
+                        color = NfTextMuted,
+                        modifier = Modifier.padding(8.dp),
                     )
                 }
             }
-            item { Section("By outcome (bucket)", state.byBucket) }
-            item { Section("By decision source", state.bySource) }
-            item { Section("Top apps", state.topApps) }
-            item { Section("Top senders", state.topSenders) }
+            breakdown("By outcome", state.byBucket)
+            breakdown("By decision", state.bySource)
+            breakdown("Top apps", state.topApps)
+            breakdown("Top senders", state.topSenders)
         }
     }
 }
 
-@Composable
-private fun Section(title: String, rows: List<Pair<String, Int>>) {
+private fun androidx.compose.foundation.lazy.LazyListScope.breakdown(
+    title: String,
+    rows: List<Pair<String, Int>>,
+) {
     if (rows.isEmpty()) return
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            rows.forEach { (label, count) ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(label, style = MaterialTheme.typography.bodyMedium)
-                    Text("$count", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+    item { SectionLabel(title) }
+    item {
+        NfCard {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                rows.forEach { (label, count) ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(label, style = MaterialTheme.typography.bodyMedium, color = NfText)
+                        Text("$count", style = MaterialTheme.typography.titleMedium, color = NfTitle)
+                    }
                 }
             }
         }
