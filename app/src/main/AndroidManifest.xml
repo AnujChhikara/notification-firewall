@@ -1,23 +1,38 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Required (Android 13+) to post the re-posted SILENCE / CUSTOM_SOUND
-         notifications from BucketExecutor. Runtime request of this
-         permission is wired up by the onboarding/settings UI task; this
-         manifest declaration is what BucketExecutor's notify() calls need
-         to be valid regardless of when the user grants it. -->
+         notifications from BucketExecutor and the wake-up digest. Requested at
+         runtime by onboarding; declared here so notify() calls are valid. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- NotificationMapper looks up starred contacts to match "favorite
-         contact" rule conditions. Runtime grant is requested by the onboarding
-         UI task; the mapper degrades to isFavoriteContact=false without it. -->
+         contact" rule conditions. Runtime grant is requested by onboarding; the
+         mapper degrades to isFavoriteContact=false without it. -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+
+    <!-- So the onboarding "keep the listener alive" step can send the user to
+         the battery-optimization exemption prompt. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
         android:name=".NfApplication"
         android:allowBackup="false"
         android:label="Notification Firewall"
-        android:supportsRtl="true">
+        android:supportsRtl="true"
+        android:theme="@style/Theme.NotificationFirewall">
+
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:label="Notification Firewall"
+            android:theme="@style/Theme.NotificationFirewall">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
 
         <!-- The bound listener that sees every posted notification. The system
              binds it via BIND_NOTIFICATION_LISTENER_SERVICE (a privileged
@@ -34,6 +49,20 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!-- WorkManager on-demand initialization: remove the default
+             initializer so our Hilt-aware Configuration.Provider (NfApplication)
+             supplies the HiltWorkerFactory for DigestWorker. -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
     </application>
 
 </manifest>
