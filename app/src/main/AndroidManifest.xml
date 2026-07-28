@@ -8,11 +8,32 @@
          to be valid regardless of when the user grants it. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- NotificationMapper looks up starred contacts to match "favorite
+         contact" rule conditions. Runtime grant is requested by the onboarding
+         UI task; the mapper degrades to isFavoriteContact=false without it. -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+
     <application
         android:name=".NfApplication"
         android:allowBackup="false"
         android:label="Notification Firewall"
         android:supportsRtl="true">
+
+        <!-- The bound listener that sees every posted notification. The system
+             binds it via BIND_NOTIFICATION_LISTENER_SERVICE (a privileged
+             permission only the platform holds), which is why exported="false"
+             is correct: no third-party app may bind it, but the platform still
+             can. The user must additionally grant notification access in
+             Settings (ACTION_NOTIFICATION_LISTENER_SETTINGS) before it runs. -->
+        <service
+            android:name=".service.NfListenerService"
+            android:exported="false"
+            android:label="Notification Firewall"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>
