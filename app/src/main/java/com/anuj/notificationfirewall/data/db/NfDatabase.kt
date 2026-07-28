@@ -9,7 +9,7 @@ import com.anuj.notificationfirewall.data.db.dao.RuleDao
 
 @Database(
     entities = [ProfileEntity::class, RuleEntity::class, NotificationRecordEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

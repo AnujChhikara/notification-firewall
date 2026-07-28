@@ -41,6 +41,8 @@ import com.anuj.notificationfirewall.data.db.ProfileEntity
 import com.anuj.notificationfirewall.data.db.dao.ProfileDao
 import com.anuj.notificationfirewall.data.mapper.toActiveProfile
 import com.anuj.notificationfirewall.domain.model.BucketAction
+import com.anuj.notificationfirewall.domain.profile.ProfileManager
+import com.anuj.notificationfirewall.service.DndController
 import com.anuj.notificationfirewall.ui.NfScreen
 import com.anuj.notificationfirewall.ui.Routes
 import com.anuj.notificationfirewall.work.DigestScheduler
@@ -49,12 +51,15 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.DayOfWeek
+import java.time.ZonedDateTime
 import javax.inject.Inject
 
 @HiltViewModel
 class ProfilesViewModel @Inject constructor(
     private val profileDao: ProfileDao,
     private val digestScheduler: DigestScheduler,
+    private val profileManager: ProfileManager,
+    private val dndController: DndController,
 ) : ViewModel() {
 
     val profiles = profileDao.observeProfiles()
@@ -67,6 +72,12 @@ class ProfilesViewModel @Inject constructor(
             val id = profileDao.upsert(entity)
             val stored = profileDao.profileById(id) ?: entity
             digestScheduler.scheduleForProfile(stored.toActiveProfile())
+            // Reflect an enabled/disabled or auto-DND change on the phone right away.
+            val active = profileManager.activeProfile(
+                profileDao.enabledProfiles().map { it.toActiveProfile() },
+                ZonedDateTime.now(),
+            )
+            dndController.reconcile(active)
         }
     }
 }
@@ -116,6 +127,7 @@ fun ProfileEditScreen(nav: NavHostController, profileId: Long, vm: ProfilesViewM
 
     var enabled by remember(current) { mutableStateOf(current.enabled) }
     var aiEnabled by remember(current) { mutableStateOf(current.aiEnabled) }
+    var autoDnd by remember(current) { mutableStateOf(current.autoDnd) }
     var defaultAction by remember(current) { mutableStateOf(current.defaultAction) }
     var startH by remember(current) { mutableStateOf((current.startMinuteOfDay / 60).toString()) }
     var startM by remember(current) { mutableStateOf((current.startMinuteOfDay % 60).toString()) }
@@ -130,6 +142,13 @@ fun ProfileEditScreen(nav: NavHostController, profileId: Long, vm: ProfilesViewM
         ) {
             ToggleRow("Enabled", enabled) { enabled = it }
             ToggleRow("AI triage (Ask-AI default calls OpenAI)", aiEnabled) { aiEnabled = it }
+            ToggleRow("Auto Do-Not-Disturb while active", autoDnd) { autoDnd = it }
+            Text(
+                "Auto-DND silences every notification through the system while this " +
+                    "profile is on; only your ring-through rules make a sound. Needs " +
+                    "DND access (grant it in Setup).",
+                style = MaterialTheme.typography.labelSmall,
+            )
 
             Text("Default action (no rule matches)", style = MaterialTheme.typography.titleSmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -174,6 +193,7 @@ fun ProfileEditScreen(nav: NavHostController, profileId: Long, vm: ProfilesViewM
                         current.copy(
                             enabled = enabled,
                             aiEnabled = aiEnabled,
+                            autoDnd = autoDnd,
                             defaultAction = defaultAction,
                             startMinuteOfDay = toMinute(startH, startM),
                             endMinuteOfDay = toMinute(endH, endM),

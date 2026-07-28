@@ -14,5 +14,10 @@ data class ProfileEntity(
     val daysOfWeek: Set<Int>,
     val order: Int,
     val aiEnabled: Boolean,
-    val defaultAction: BucketAction
+    val defaultAction: BucketAction,
+    // When true, the app turns on system Do Not Disturb while this profile is
+    // active so the OS silences all original notifications at arrival; only the
+    // profile's "let-through-custom-sound" rules re-post on a DND-bypass channel
+    // and actually ring.
+    val autoDnd: Boolean = false
 )

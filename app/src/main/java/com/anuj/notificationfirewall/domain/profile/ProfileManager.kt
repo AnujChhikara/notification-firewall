@@ -7,7 +7,7 @@ import java.time.ZonedDateTime
 data class ActiveProfile(
     val id: Long, val name: String, val order: Int, val aiEnabled: Boolean,
     val defaultAction: BucketAction, val startMinute: Int, val endMinute: Int,
-    val days: Set<DayOfWeek>, val enabled: Boolean,
+    val days: Set<DayOfWeek>, val enabled: Boolean, val autoDnd: Boolean = false,
 )
 class ProfileManager {
     fun activeProfile(profiles: List<ActiveProfile>, at: ZonedDateTime): ActiveProfile? {

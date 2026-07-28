@@ -31,7 +31,17 @@ class SecurePrefs(private val prefs: SharedPreferences) {
     val hasKey: Boolean
         get() = !openAiKey.isNullOrBlank()
 
+    /**
+     * True while system DND is currently on *because this app turned it on* for an
+     * active auto-DND profile. Lets [DndController] restore DND only when it owns
+     * the change, never clobbering DND the user enabled manually.
+     */
+    var dndSetByApp: Boolean
+        get() = prefs.getBoolean(KEY_DND_SET_BY_APP, false)
+        set(value) = prefs.edit { putBoolean(KEY_DND_SET_BY_APP, value) }
+
     private companion object {
         const val KEY_OPENAI_API_KEY = "openai_api_key"
+        const val KEY_DND_SET_BY_APP = "dnd_set_by_app"
     }
 }

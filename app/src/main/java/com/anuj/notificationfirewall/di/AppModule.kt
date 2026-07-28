@@ -58,7 +58,11 @@ object AppModule {
     @Provides
     @Singleton
     fun provideNfDatabase(@ApplicationContext context: Context): NfDatabase =
-        Room.databaseBuilder(context, NfDatabase::class.java, DATABASE_NAME).build()
+        Room.databaseBuilder(context, NfDatabase::class.java, DATABASE_NAME)
+            // M1 has no real user data worth migrating; a schema change just
+            // rebuilds the DB and the seeder re-populates the default profile.
+            .fallbackToDestructiveMigration()
+            .build()
 
     @Provides
     fun provideProfileDao(db: NfDatabase): ProfileDao = db.profileDao()

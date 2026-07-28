@@ -17,6 +17,7 @@ fun ProfileEntity.toActiveProfile(): ActiveProfile = ActiveProfile(
     endMinute = endMinuteOfDay,
     days = daysOfWeek.map { DayOfWeek.of(it) }.toSet(),
     enabled = enabled,
+    autoDnd = autoDnd,
 )
 
 fun RuleEntity.toRule(): Rule = Rule(
