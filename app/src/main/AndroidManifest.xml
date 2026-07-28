@@ -16,6 +16,18 @@
          the battery-optimization exemption prompt. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <!-- Reliability: keep-alive foreground service while a profile is active. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <!-- Reliability: exact alarms drive precise profile start/end boundaries and
+         are a valid context for launching the keep-alive service. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+
+    <!-- Reliability: re-arm the schedule and re-assert state after a reboot. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
     <application
         android:name=".NfApplication"
         android:allowBackup="false"
@@ -51,6 +63,34 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!-- Keep-alive foreground service, run only while a profile window is
+             active. specialUse: our need (pinning the notification listener
+             during scheduled windows) doesn't fit a standard FGS type. -->
+        <service
+            android:name=".service.KeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the notification firewall filtering during scheduled profile windows" />
+        </service>
+
+        <!-- Fired by an exact alarm at each profile-window boundary. Not exported:
+             it is triggered only by our own PendingIntent. -->
+        <receiver
+            android:name=".service.ProfileBoundaryReceiver"
+            android:exported="false" />
+
+        <!-- Re-arms the schedule after a reboot. Only listens to the protected
+             BOOT_COMPLETED broadcast. -->
+        <receiver
+            android:name=".service.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
         <!-- WorkManager on-demand initialization: remove the default
              initializer so our Hilt-aware Configuration.Provider (NfApplication)
