@@ -1,12 +1,13 @@
 // ui/MainActivity.kt
 package com.anuj.notificationfirewall.ui
 
+import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Scaffold
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -62,10 +63,17 @@ class MainViewModel @Inject constructor(
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Draw behind the status/navigation bars with transparent, light-content
+        // (SystemBarStyle.dark) bars so the app's black canvas is continuous with
+        // the system bars.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+        )
         super.onCreate(savedInstanceState)
         setContent {
             NfTheme {
-                Surface {
+                Surface(Modifier.fillMaxSize()) {
                     NfApp()
                 }
             }
@@ -73,7 +81,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun NfApp(
     @Suppress("UNUSED_PARAMETER") mainViewModel: MainViewModel = hiltViewModel(),
@@ -100,31 +107,5 @@ private fun NfNavGraph(nav: NavHostController) {
             val id = backStack.arguments?.getString("profileId")?.toLongOrNull() ?: return@composable
             RuleBuilderScreen(nav, id)
         }
-    }
-}
-
-/** Shared scaffold used by the top-level screens. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun NfScreen(
-    title: String,
-    onBack: (() -> Unit)? = null,
-    content: @Composable (Modifier) -> Unit,
-) {
-    Scaffold(
-        topBar = {
-            androidx.compose.material3.TopAppBar(
-                title = { androidx.compose.material3.Text(title) },
-                navigationIcon = {
-                    if (onBack != null) {
-                        androidx.compose.material3.TextButton(onClick = onBack) {
-                            androidx.compose.material3.Text("Back")
-                        }
-                    }
-                },
-            )
-        },
-    ) { padding ->
-        content(Modifier.padding(padding))
     }
 }

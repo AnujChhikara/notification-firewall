@@ -1,20 +1,19 @@
 // ui/inbox/InboxScreen.kt
 package com.anuj.notificationfirewall.ui.inbox
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -27,6 +26,12 @@ import com.anuj.notificationfirewall.data.db.NotificationRecordEntity
 import com.anuj.notificationfirewall.data.db.dao.NotificationDao
 import com.anuj.notificationfirewall.domain.model.BucketAction
 import com.anuj.notificationfirewall.ui.NfScreen
+import com.anuj.notificationfirewall.ui.StatusDot
+import com.anuj.notificationfirewall.ui.bucketColor
+import com.anuj.notificationfirewall.ui.bucketLabel
+import com.anuj.notificationfirewall.ui.theme.NfTextFaint
+import com.anuj.notificationfirewall.ui.theme.NfTextMuted
+import com.anuj.notificationfirewall.ui.theme.NfTitle
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
@@ -53,59 +58,78 @@ class InboxViewModel @Inject constructor(
 @Composable
 fun InboxScreen(nav: NavHostController, vm: InboxViewModel = hiltViewModel()) {
     val records by vm.records.collectAsStateWithLifecycle()
-    val grouped = records.groupBy { it.appLabel }
+    val unread = records.count { !it.isRead }
 
-    NfScreen(title = "Inbox", onBack = { nav.popBackStack() }) { modifier ->
+    NfScreen(
+        eyebrow = if (unread > 0) "$unread unread" else "All caught up",
+        title = "Inbox",
+        onBack = { nav.popBackStack() },
+    ) { modifier ->
         if (records.isEmpty()) {
             Text(
-                "Nothing captured or silenced yet.",
-                modifier = modifier.padding(16.dp),
+                "Nothing held back yet. Captured and silenced notifications land here.",
+                modifier = modifier.padding(20.dp),
                 style = MaterialTheme.typography.bodyLarge,
+                color = NfTextMuted,
             )
             return@NfScreen
         }
         LazyColumn(
-            modifier = modifier.fillMaxWidth().padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            contentPadding = PaddingValues(bottom = 32.dp),
         ) {
-            grouped.forEach { (app, recs) ->
-                item {
-                    Text(
-                        "$app (${recs.size})",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-                items(recs) { rec -> InboxRow(rec) { vm.markRead(rec.id) } }
-            }
+            items(records) { rec -> InboxRow(rec) { vm.markRead(rec.id) } }
         }
     }
 }
 
 @Composable
 private fun InboxRow(rec: NotificationRecordEntity, onMarkRead: () -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable { if (!rec.isRead) onMarkRead() }
+            .padding(horizontal = 8.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        StatusDot(bucketColor(rec.bucket), size = 8.dp)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
-                rec.title.ifBlank { "(no title)" },
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = if (rec.isRead) FontWeight.Normal else FontWeight.Bold,
+                rec.title.ifBlank { rec.appLabel },
+                style = MaterialTheme.typography.titleMedium,
+                color = if (rec.isRead) NfTextMuted else NfTitle,
+                fontWeight = if (rec.isRead) FontWeight.Normal else FontWeight.SemiBold,
             )
             if (rec.text.isNotBlank()) {
-                Text(rec.text, style = MaterialTheme.typography.bodyMedium, maxLines = 3)
+                Text(
+                    rec.text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = NfTextMuted,
+                    maxLines = 2,
+                )
             }
             Text(
-                "${rec.bucket} · ${rec.decisionSource}",
+                "${rec.appLabel} · ${bucketLabel(rec.bucket)}" +
+                    (rec.aiReason?.let { " · $it" } ?: ""),
                 style = MaterialTheme.typography.labelSmall,
+                color = NfTextFaint,
             )
-            rec.aiReason?.let { reason ->
-                Text("AI: $reason", style = MaterialTheme.typography.labelSmall)
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                if (!rec.isRead) {
-                    TextButton(onClick = onMarkRead) { Text("Mark read") }
-                }
-            }
         }
+        Text(
+            relativeTime(rec.timestampEpochMs),
+            style = MaterialTheme.typography.labelSmall,
+            color = NfTextFaint,
+        )
+    }
+}
+
+private fun relativeTime(epochMs: Long): String {
+    val diff = System.currentTimeMillis() - epochMs
+    val minutes = diff / 60_000
+    return when {
+        minutes < 1 -> "now"
+        minutes < 60 -> "${minutes}m"
+        minutes < 60 * 24 -> "${minutes / 60}h"
+        else -> "${minutes / (60 * 24)}d"
     }
 }

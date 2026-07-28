@@ -1,7 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Framework Material theme so no AppCompat/Material-Components XML
-         dependency is needed; the actual UI is Jetpack Compose which themes
-         itself. NoActionBar because Compose draws its own top bars. -->
-    <style name="Theme.NotificationFirewall" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- Dark, no action bar (Compose draws its own chrome), edge-to-edge with
+         transparent system bars so the app's black canvas flows behind the
+         status and navigation bars. windowBackground matches the Compose canvas
+         to avoid a light flash on launch. -->
+    <style name="Theme.NotificationFirewall" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/nf_window_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
 </resources>
