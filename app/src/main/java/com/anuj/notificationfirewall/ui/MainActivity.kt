@@ -22,11 +22,13 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.anuj.notificationfirewall.data.prefs.SecurePrefs
 import com.anuj.notificationfirewall.data.seed.DefaultSeeder
 import com.anuj.notificationfirewall.service.HealthMonitor
 import com.anuj.notificationfirewall.service.ProfileStateReconciler
 import com.anuj.notificationfirewall.work.ProfileScheduler
 import com.anuj.notificationfirewall.ui.analytics.AnalyticsScreen
+import com.anuj.notificationfirewall.ui.welcome.WelcomeScreen
 import com.anuj.notificationfirewall.ui.digest.DigestScreen
 import com.anuj.notificationfirewall.ui.home.HomeScreen
 import com.anuj.notificationfirewall.ui.inbox.InboxScreen
@@ -43,6 +45,7 @@ import javax.inject.Inject
 
 /** Nav routes. Screens that take an id append it as a path arg. */
 object Routes {
+    const val WELCOME = "welcome"
     const val HOME = "home"
     const val ONBOARDING = "onboarding"
     const val INBOX = "inbox"
@@ -63,7 +66,10 @@ class MainViewModel @Inject constructor(
     private val scheduler: ProfileScheduler,
     private val reconciler: ProfileStateReconciler,
     private val healthMonitor: HealthMonitor,
+    securePrefs: SecurePrefs,
 ) : ViewModel() {
+    val startDestination: String = if (securePrefs.hasSeenWelcome) Routes.HOME else Routes.WELCOME
+
     init {
         viewModelScope.launch {
             // First-run seed of the Sleep profile + rule table (design §7), then
@@ -100,7 +106,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun NfApp(
-    @Suppress("UNUSED_PARAMETER") mainViewModel: MainViewModel = hiltViewModel(),
+    mainViewModel: MainViewModel = hiltViewModel(),
 ) {
     val nav = rememberNavController()
     val currentRoute by nav.currentBackStackEntryAsState()
@@ -108,7 +114,7 @@ private fun NfApp(
     val primaryRoutes = setOf(Routes.HOME, Routes.INBOX, Routes.ANALYTICS, Routes.SETTINGS)
 
     Box(Modifier.fillMaxSize()) {
-        NfNavGraph(nav)
+        NfNavGraph(nav, mainViewModel.startDestination)
         if (route in primaryRoutes) {
             NfBottomBar(
                 currentRoute = route,
@@ -128,8 +134,9 @@ private fun NfApp(
 }
 
 @Composable
-private fun NfNavGraph(nav: NavHostController) {
-    NavHost(navController = nav, startDestination = Routes.HOME) {
+private fun NfNavGraph(nav: NavHostController, startDestination: String) {
+    NavHost(navController = nav, startDestination = startDestination) {
+        composable(Routes.WELCOME) { WelcomeScreen(nav) }
         composable(Routes.HOME) { HomeScreen(nav) }
         composable(Routes.ONBOARDING) { OnboardingScreen(nav) }
         composable(Routes.INBOX) { InboxScreen(nav) }

@@ -73,6 +73,11 @@ class SecurePrefs(private val prefs: SharedPreferences) {
         get() = prefs.getBoolean(KEY_EVER_CONNECTED, false)
         set(value) = prefs.edit { putBoolean(KEY_EVER_CONNECTED, value) }
 
+    /** True once the user has seen the first-run welcome slides. */
+    var hasSeenWelcome: Boolean
+        get() = prefs.getBoolean(KEY_HAS_SEEN_WELCOME, false)
+        set(value) = prefs.edit { putBoolean(KEY_HAS_SEEN_WELCOME, value) }
+
     private companion object {
         const val KEY_OPENAI_API_KEY = "openai_api_key"
         const val KEY_DND_SET_BY_APP = "dnd_set_by_app"
@@ -83,5 +88,6 @@ class SecurePrefs(private val prefs: SharedPreferences) {
         const val KEY_DND_SUPPRESSED = "dnd_saved_suppressed"
         const val KEY_LISTENER_CONNECTED = "listener_connected"
         const val KEY_EVER_CONNECTED = "ever_connected"
+        const val KEY_HAS_SEEN_WELCOME = "has_seen_welcome"
     }
 }

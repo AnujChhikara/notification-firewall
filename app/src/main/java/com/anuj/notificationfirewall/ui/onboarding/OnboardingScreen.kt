@@ -60,7 +60,17 @@ fun OnboardingScreen(nav: NavHostController) {
         ActivityResultContracts.RequestPermission(),
     ) { refresh++ }
 
-    NfScreen(eyebrow = "Grant access", title = "Setup", onBack = { nav.popBackStack() }) { modifier ->
+    // On first run Onboarding is the root (Welcome was popped), so a plain
+    // popBackStack would do nothing — fall through to Home instead.
+    val finish = {
+        if (!nav.popBackStack()) {
+            nav.navigate(com.anuj.notificationfirewall.ui.Routes.HOME) {
+                popUpTo(com.anuj.notificationfirewall.ui.Routes.ONBOARDING) { inclusive = true }
+            }
+        } else Unit
+    }
+
+    NfScreen(eyebrow = "Grant access", title = "Setup", onBack = finish) { modifier ->
         Column(
             modifier = modifier
                 .fillMaxWidth()
@@ -133,7 +143,7 @@ fun OnboardingScreen(nav: NavHostController) {
                 }
             }
 
-            NfButton("Done", onClick = { nav.popBackStack() }, modifier = Modifier.fillMaxWidth())
+            NfButton("Done", onClick = finish, modifier = Modifier.fillMaxWidth())
         }
     }
 }

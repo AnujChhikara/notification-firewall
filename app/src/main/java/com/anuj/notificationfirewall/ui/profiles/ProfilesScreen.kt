@@ -6,7 +6,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -24,6 +26,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -77,6 +80,21 @@ class ProfilesViewModel @Inject constructor(
 
     suspend fun load(id: Long): ProfileEntity? = profileDao.profileById(id)
 
+    /** Creates a disabled draft profile and returns its id for editing. */
+    suspend fun createProfile(): Long = profileDao.upsert(
+        ProfileEntity(
+            name = "New profile",
+            enabled = false,
+            startMinuteOfDay = 22 * 60,
+            endMinuteOfDay = 7 * 60,
+            daysOfWeek = (1..7).toSet(),
+            order = profileDao.nextOrder(),
+            aiEnabled = false,
+            defaultAction = BucketAction.CAPTURE,
+            autoDnd = false,
+        ),
+    )
+
     fun save(entity: ProfileEntity) {
         viewModelScope.launch {
             val id = profileDao.upsert(entity)
@@ -88,16 +106,46 @@ class ProfilesViewModel @Inject constructor(
             reconciler.reconcileFromDb(canStartForeground = true)
         }
     }
+
+    fun deleteProfile(entity: ProfileEntity) {
+        viewModelScope.launch {
+            profileDao.delete(entity)
+            profileScheduler.rescheduleAll()
+            reconciler.reconcileFromDb(canStartForeground = true)
+        }
+    }
 }
 
 @Composable
 fun ProfilesScreen(nav: NavHostController, vm: ProfilesViewModel = hiltViewModel()) {
     val profiles by vm.profiles.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
+
     NfScreen(eyebrow = "When the firewall is active", title = "Profiles", onBack = { nav.popBackStack() }) { modifier ->
         LazyColumn(
             modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 32.dp),
         ) {
+            item {
+                NfButton(
+                    "New profile",
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { scope.launch { nav.navigate(Routes.profileEdit(vm.createProfile())) } },
+                )
+            }
+
+            if (profiles.isEmpty()) {
+                item {
+                    Text(
+                        "No profiles yet. Create one to set quiet hours or a focus window.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = NfTextMuted,
+                        modifier = Modifier.padding(8.dp),
+                    )
+                }
+            }
+
             items(profiles) { p ->
                 NfCard {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -136,6 +184,7 @@ fun ProfileEditScreen(nav: NavHostController, profileId: Long, vm: ProfilesViewM
         return
     }
 
+    var name by remember(current) { mutableStateOf(current.name) }
     var enabled by remember(current) { mutableStateOf(current.enabled) }
     var aiEnabled by remember(current) { mutableStateOf(current.aiEnabled) }
     var autoDnd by remember(current) { mutableStateOf(current.autoDnd) }
@@ -146,12 +195,23 @@ fun ProfileEditScreen(nav: NavHostController, profileId: Long, vm: ProfilesViewM
     var endM by remember(current) { mutableStateOf((current.endMinuteOfDay % 60).toString()) }
     var days by remember(current) { mutableStateOf(current.daysOfWeek) }
 
-    NfScreen(eyebrow = "Profile", title = current.name, onBack = { nav.popBackStack() }) { modifier ->
+    NfScreen(eyebrow = "Profile", title = name.ifBlank { "Untitled" }, onBack = { nav.popBackStack() }) { modifier ->
         Column(
             modifier = modifier.fillMaxWidth().verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp).padding(bottom = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            SectionLabel("Name")
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                singleLine = true,
+                placeholder = { Text("e.g. Sleep, Work, Focus") },
+                colors = fieldColors(),
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            SectionLabel("Behaviour")
             NfCard {
                 Column(Modifier.padding(vertical = 4.dp, horizontal = 16.dp)) {
                     ToggleRow("Enabled", enabled) { enabled = it }
@@ -160,48 +220,52 @@ fun ProfileEditScreen(nav: NavHostController, profileId: Long, vm: ProfilesViewM
                 }
             }
             Text(
-                "Mutes app notifications while this profile is on — phone calls, repeat callers " +
-                    "and alarms always ring, and so do your ring-through rules. Needs the " +
-                    "\"Silence access\" grant.",
+                "Silencing mutes app notifications while this profile is on — phone calls, " +
+                    "repeat callers and alarms always ring, and so do your ring-through rules. " +
+                    "Needs the \"Silence access\" grant.",
                 style = MaterialTheme.typography.labelSmall, color = NfTextFaint,
                 modifier = Modifier.padding(horizontal = 4.dp),
             )
 
             SectionLabel("Default action (no rule matches)")
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(BucketAction.SILENCE, BucketAction.CAPTURE, BucketAction.ASK_AI).forEach { a ->
                     NfChip(a.name, defaultAction == a, { defaultAction = a })
                 }
             }
 
-            SectionLabel("Active window (24h)")
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                TimeField("H", startH) { startH = it }
-                TimeField("M", startM) { startM = it }
-                Text("to", color = NfTextMuted)
-                TimeField("H", endH) { endH = it }
-                TimeField("M", endM) { endM = it }
+            SectionLabel("Active window")
+            NfCard {
+                Row(
+                    Modifier.padding(16.dp).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(20.dp),
+                ) {
+                    TimePicker("Start", startH, startM, { startH = it }, { startM = it })
+                    TimePicker("End", endH, endM, { endH = it }, { endM = it })
+                }
             }
             Text(
-                "To test now, set 00 : 00 to 23 : 59.",
+                "To test right now, set the window to 00:00 – 23:59.",
                 style = MaterialTheme.typography.labelSmall, color = NfTextFaint,
                 modifier = Modifier.padding(horizontal = 4.dp),
             )
 
             SectionLabel("Days")
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 DayOfWeek.values().forEach { dow ->
                     val v = dow.value
                     NfChip(dow.name.take(3), v in days, { days = if (v in days) days - v else days + v })
                 }
             }
 
+            Spacer(Modifier.height(4.dp))
             NfButton(
                 "Save",
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                modifier = Modifier.fillMaxWidth(),
                 onClick = {
                     vm.save(
                         current.copy(
+                            name = name.trim().ifBlank { "Untitled" },
                             enabled = enabled, aiEnabled = aiEnabled, autoDnd = autoDnd,
                             defaultAction = defaultAction,
                             startMinuteOfDay = toMinute(startH, startM),
@@ -212,6 +276,30 @@ fun ProfileEditScreen(nav: NavHostController, profileId: Long, vm: ProfilesViewM
                     nav.popBackStack()
                 },
             )
+            NfButton(
+                "Delete profile",
+                primary = false,
+                modifier = Modifier.fillMaxWidth(),
+                onClick = { vm.deleteProfile(current); nav.popBackStack() },
+            )
+        }
+    }
+}
+
+@Composable
+private fun TimePicker(
+    label: String,
+    hour: String,
+    minute: String,
+    onHour: (String) -> Unit,
+    onMinute: (String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = NfTextMuted)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            TimeField("HH", hour, onHour)
+            Text(":", color = NfTextMuted, style = MaterialTheme.typography.titleLarge)
+            TimeField("MM", minute, onMinute)
         }
     }
 }
@@ -245,20 +333,25 @@ private fun TimeField(label: String, value: String, onChange: (String) -> Unit) 
         label = { Text(label) },
         singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-        colors = TextFieldDefaults.colors(
-            focusedContainerColor = Color.Transparent,
-            unfocusedContainerColor = Color.Transparent,
-            focusedIndicatorColor = NfAccent,
-            unfocusedIndicatorColor = NfBorder,
-            focusedTextColor = NfTitle,
-            unfocusedTextColor = NfText,
-            cursorColor = NfAccent,
-            focusedLabelColor = NfTextMuted,
-            unfocusedLabelColor = NfTextFaint,
-        ),
-        modifier = Modifier.width(72.dp),
+        colors = fieldColors(),
+        modifier = Modifier.width(76.dp),
     )
 }
+
+@Composable
+private fun fieldColors() = TextFieldDefaults.colors(
+    focusedContainerColor = Color.Transparent,
+    unfocusedContainerColor = Color.Transparent,
+    focusedIndicatorColor = NfAccent,
+    unfocusedIndicatorColor = NfBorder,
+    focusedTextColor = NfTitle,
+    unfocusedTextColor = NfText,
+    cursorColor = NfAccent,
+    focusedLabelColor = NfTextMuted,
+    unfocusedLabelColor = NfTextFaint,
+    focusedPlaceholderColor = NfTextFaint,
+    unfocusedPlaceholderColor = NfTextFaint,
+)
 
 private fun toMinute(h: String, m: String): Int {
     val hh = h.toIntOrNull()?.coerceIn(0, 23) ?: 0
