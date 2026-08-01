@@ -19,3 +19,9 @@ captures/
 
 # SDD scratch workspace (git-ignored)
 .superpowers/
+
+# Local Claude tooling / worktrees
+.claude/
+
+# Build artifacts (regenerable)
+*.apk
