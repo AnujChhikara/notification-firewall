@@ -50,6 +50,9 @@ object Routes {
     const val ONBOARDING = "onboarding"
     const val INBOX = "inbox"
     const val ANALYTICS = "analytics"
+    const val PROGRAM = "program"
+    const val RESULTS = "results"
+    const val PODS = "pods"
     const val PROFILES = "profiles"
     const val SETTINGS = "settings"
     const val DIGEST = "digest"
@@ -111,7 +114,7 @@ private fun NfApp(
     val nav = rememberNavController()
     val currentRoute by nav.currentBackStackEntryAsState()
     val route = currentRoute?.destination?.route
-    val primaryRoutes = setOf(Routes.HOME, Routes.INBOX, Routes.ANALYTICS, Routes.SETTINGS)
+    val primaryRoutes = setOf(Routes.HOME, Routes.PROGRAM, Routes.RESULTS, Routes.PODS, Routes.SETTINGS)
 
     Box(Modifier.fillMaxSize()) {
         NfNavGraph(nav, mainViewModel.startDestination)
@@ -141,6 +144,9 @@ private fun NfNavGraph(nav: NavHostController, startDestination: String) {
         composable(Routes.ONBOARDING) { OnboardingScreen(nav) }
         composable(Routes.INBOX) { InboxScreen(nav) }
         composable(Routes.ANALYTICS) { AnalyticsScreen(nav) }
+        composable(Routes.PROGRAM) { com.anuj.notificationfirewall.ui.program.ProgramScreen(nav) }
+        composable(Routes.RESULTS) { com.anuj.notificationfirewall.ui.results.ResultsScreen(nav) }
+        composable(Routes.PODS) { com.anuj.notificationfirewall.ui.pods.PodsScreen(nav) }
         composable(Routes.PROFILES) { ProfilesScreen(nav) }
         composable(Routes.SETTINGS) { SettingsScreen(nav) }
         composable(Routes.DIGEST) { DigestScreen(nav) }

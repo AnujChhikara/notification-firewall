@@ -106,7 +106,7 @@ fun HomeScreen(nav: NavHostController, vm: HomeViewModel = hiltViewModel()) {
         )
     }
 
-    NfScreen(eyebrow = "Notification Firewall", title = if (status.coreReady) "Armed" else "Setup needed") { modifier ->
+    NfScreen(eyebrow = "Still", title = if (status.coreReady) "Armed" else "Setup needed") { modifier ->
         LazyColumn(
             modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -151,13 +151,6 @@ fun HomeScreen(nav: NavHostController, vm: HomeViewModel = hiltViewModel()) {
 
             item { SectionLabel("Overview") }
             item { NfRow("Inbox", subtitle = "Captured & silenced", dotColor = NfAccent) { nav.navigate(Routes.INBOX) } }
-            item { NfRow("Analytics", subtitle = "What's coming in", dotColor = NfRang) { nav.navigate(Routes.ANALYTICS) } }
-
-            item { SectionLabel("Manage") }
-            item { NfRow("Profiles & rules") { nav.navigate(Routes.PROFILES) } }
-            item { NfRow("Wake-up digest") { nav.navigate(Routes.DIGEST) } }
-            item { NfRow("Settings") { nav.navigate(Routes.SETTINGS) } }
-            item { NfRow("Permissions") { nav.navigate(Routes.ONBOARDING) } }
 
             if (recent.isNotEmpty()) {
                 item { SectionLabel("Recent") }

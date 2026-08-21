@@ -28,7 +28,9 @@ import androidx.navigation.NavHostController
 import com.anuj.notificationfirewall.data.prefs.SecurePrefs
 import com.anuj.notificationfirewall.ui.NfButton
 import com.anuj.notificationfirewall.ui.NfCard
+import com.anuj.notificationfirewall.ui.NfRow
 import com.anuj.notificationfirewall.ui.NfScreen
+import com.anuj.notificationfirewall.ui.Routes
 import com.anuj.notificationfirewall.ui.SectionLabel
 import com.anuj.notificationfirewall.ui.StatusDot
 import com.anuj.notificationfirewall.ui.permissions.Permissions
@@ -59,7 +61,7 @@ fun SettingsScreen(nav: NavHostController, vm: SettingsViewModel = hiltViewModel
     var saved by remember { mutableStateOf(false) }
     val status = Permissions.status(context, hasApiKey = key.isNotBlank())
 
-    NfScreen(eyebrow = "Configuration", title = "Settings", onBack = { nav.popBackStack() }) { modifier ->
+    NfScreen(eyebrow = "Configuration", title = "Settings") { modifier ->
         Column(
             modifier = modifier
                 .fillMaxWidth()
@@ -68,6 +70,15 @@ fun SettingsScreen(nav: NavHostController, vm: SettingsViewModel = hiltViewModel
                 .padding(bottom = 100.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            SectionLabel("Firewall")
+            NfCard {
+                Column(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+                    NfRow("Profiles & rules", subtitle = "Schedules, buckets, auto-DND") { nav.navigate(Routes.PROFILES) }
+                    NfRow("Wake-up digest", subtitle = "What you missed while away") { nav.navigate(Routes.DIGEST) }
+                    NfRow("Permissions", subtitle = "Access & reliability grants") { nav.navigate(Routes.ONBOARDING) }
+                }
+            }
+
             SectionLabel("OpenAI")
             NfCard {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
