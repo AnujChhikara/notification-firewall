@@ -10,8 +10,8 @@ import android.graphics.drawable.Icon
 import android.service.notification.StatusBarNotification
 import android.util.Log
 import androidx.core.content.ContextCompat
-import com.anuj.notificationfirewall.domain.model.BucketAction
-import com.anuj.notificationfirewall.domain.model.SoundConfig
+import com.anuj.notificationfirewall.domain.wall.WallBucket
+import com.anuj.notificationfirewall.domain.wall.WallDecision
 
 private const val TAG = "BucketExecutor"
 
@@ -35,16 +35,16 @@ fun interface NotificationCanceller {
 }
 
 /**
- * Executes a bucket decision produced by NotificationPipeline: cancels
- * and/or re-posts the intercepted notification per [BucketAction].
+ * Executes a bucket decision produced by [com.anuj.notificationfirewall.domain.wall.WallPipeline]:
+ * cancels and/or re-posts the intercepted notification per [WallDecision.bucket].
  *
  * Documented trade-off: any re-posted notification is posted by THIS app,
  * not the original one, so it cannot carry the original app's action
  * PendingIntents (reply, mark-as-read, etc.) -- those are scoped to the
  * original app's process/components and cannot be re-issued by us. Only
- * title, text, and icons are carried over. LET_THROUGH_AS_IS is therefore
- * the only bucket that preserves native actions, because it is a pure
- * no-op that never touches the original notification.
+ * title, text, and icons are carried over. SILENCE is therefore the only
+ * bucket that preserves native actions, because it leaves the original
+ * notification untouched.
  */
 class BucketExecutor(
     private val context: Context,
@@ -58,57 +58,27 @@ class BucketExecutor(
     /** See [NotificationCanceller] kdoc. Null when no listener is bound. */
     var canceller: NotificationCanceller? = null
 
-    fun execute(result: PipelineResult, sbn: StatusBarNotification, soundConfig: SoundConfig?) {
-        when (result.bucket) {
-            BucketAction.LET_THROUGH_AS_IS -> {
-                // onNotificationPosted also fires for UPDATES to the same
-                // sbn.key. If an earlier update was bucketed SILENCE /
-                // CUSTOM_SOUND we created our own re-post for this key; clear
-                // it so the now-let-through original is not shadowed by a
-                // stale silenced copy. Idempotent no-op when none exists.
-                cancelOurRepost(sbn)
-                // Otherwise a no-op: leave the original notification exactly
-                // as posted so its native actions (e.g. quick-reply) work.
+    fun execute(decision: WallDecision, sbn: StatusBarNotification) {
+        when (decision.bucket) {
+            WallBucket.RING -> {
+                // Under DND the OS has already silenced the original, so a
+                // re-post on the bypass channel is the only thing that can
+                // actually alert. Cancel the silent original so the tray does
+                // not show the same notification twice.
+                cancelOriginal(sbn)
+                repost(sbn, channelManager.ringChannelId())
             }
 
-            BucketAction.SILENCE -> {
-                cancelOriginal(sbn)
-                repost(sbn, channelManager.channelFor(sbn.packageName, null))
-            }
-
-            BucketAction.CAPTURE -> {
-                // The record is already persisted by the listener before it
-                // calls execute(); we only need to remove the notification
-                // from the tray, nothing is re-posted.
-                cancelOriginal(sbn)
-                // Also clear any re-post from an earlier update of this key
-                // (see LET_THROUGH_AS_IS) so CAPTURE truly leaves the tray
-                // empty for this notification. Idempotent.
+            WallBucket.SILENCE -> {
+                // Leave the original in place. DND already stripped its sound
+                // and heads-up, so it sits quietly in the shade exactly as the
+                // user would expect, keeping the origin app's own actions.
                 cancelOurRepost(sbn)
             }
 
-            BucketAction.LET_THROUGH_CUSTOM_SOUND -> {
-                if (soundConfig == null) {
-                    Log.w(
-                        TAG,
-                        "LET_THROUGH_CUSTOM_SOUND for ${sbn.key} arrived with no SoundConfig; " +
-                            "downgrading to the silent channel",
-                    )
-                }
+            WallBucket.DROP -> {
                 cancelOriginal(sbn)
-                repost(sbn, channelManager.channelFor(sbn.packageName, soundConfig))
-            }
-
-            BucketAction.ASK_AI -> {
-                // Defensive only. NotificationPipeline always resolves
-                // ASK_AI to a concrete bucket before a PipelineResult is
-                // produced (see NotificationPipeline.decide), so this
-                // should be unreachable. If it ever leaks through anyway,
-                // fail safe to SILENCE rather than crash or leave an
-                // unfiltered notification visible.
-                Log.w(TAG, "ASK_AI reached BucketExecutor for ${sbn.key}; treating as SILENCE")
-                cancelOriginal(sbn)
-                repost(sbn, channelManager.channelFor(sbn.packageName, null))
+                cancelOurRepost(sbn)
             }
         }
     }

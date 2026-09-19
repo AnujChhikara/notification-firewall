@@ -19,9 +19,16 @@ import com.anuj.notificationfirewall.data.db.dao.ProfileDao
 import com.anuj.notificationfirewall.data.db.dao.RuleDao
 import com.anuj.notificationfirewall.data.db.dao.SenderBiasDao
 import com.anuj.notificationfirewall.data.db.dao.VerdictCacheDao
+import com.anuj.notificationfirewall.ai.jev.JevClient
 import com.anuj.notificationfirewall.data.prefs.SecurePrefs
+import com.anuj.notificationfirewall.data.prefs.WallSettings
 import com.anuj.notificationfirewall.domain.profile.ProfileManager
 import com.anuj.notificationfirewall.domain.rules.RuleEngine
+import com.anuj.notificationfirewall.domain.wall.BiasStore
+import com.anuj.notificationfirewall.domain.wall.JevApi
+import com.anuj.notificationfirewall.domain.wall.OverrideStore
+import com.anuj.notificationfirewall.domain.wall.VerdictCache
+import com.anuj.notificationfirewall.domain.wall.WallPipeline
 import com.anuj.notificationfirewall.service.BucketExecutor
 import com.anuj.notificationfirewall.service.ChannelManager
 import com.anuj.notificationfirewall.service.NotificationPipeline
@@ -32,11 +39,14 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
+import java.time.ZoneId
+import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 
 private const val DATABASE_NAME = "notification-firewall.db"
 private const val SECURE_PREFS_FILE_NAME = "nf_secure_prefs"
 private const val OPENAI_BASE_URL = "https://api.openai.com/v1/"
+private const val JEV_BASE_URL = "https://api.typesafe.ai/"
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -140,4 +150,60 @@ object AppModule {
         @ApplicationContext context: Context,
         channelManager: ChannelManager,
     ): BucketExecutor = BucketExecutor(context, channelManager)
+
+    @Provides
+    @Singleton
+    fun provideWallSettings(@ApplicationContext context: Context): WallSettings {
+        val masterKey = MasterKey.Builder(context)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        val prefs = EncryptedSharedPreferences.create(
+            context,
+            SECURE_PREFS_FILE_NAME,
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+        )
+        return WallSettings(prefs)
+    }
+
+    /** Short timeout on purpose: a slow Jev degrades to silence-and-store
+     *  rather than holding up the notification pipeline. */
+    @Provides
+    @Singleton
+    @JevHttp
+    fun provideJevHttpClient(): OkHttpClient = OkHttpClient.Builder()
+        .callTimeout(3, TimeUnit.SECONDS)
+        .build()
+
+    @Provides
+    @Singleton
+    fun provideJevApi(@JevHttp http: OkHttpClient, settings: WallSettings): JevApi =
+        JevClient(JEV_BASE_URL.toHttpUrl(), settings.jevKey.orEmpty(), http)
+
+    @Provides
+    @Singleton
+    fun provideVerdictCache(dao: VerdictCacheDao): VerdictCache = VerdictCache(dao)
+
+    @Provides
+    @Singleton
+    fun provideBiasStore(dao: SenderBiasDao): BiasStore = BiasStore(dao)
+
+    @Provides
+    @Singleton
+    fun provideOverrideStore(dao: OverrideDao): OverrideStore = OverrideStore(dao)
+
+    @Provides
+    @Singleton
+    fun provideWallPipeline(
+        overrides: OverrideStore,
+        cache: VerdictCache,
+        bias: BiasStore,
+        jev: JevApi,
+        settings: WallSettings,
+    ): WallPipeline = WallPipeline(overrides, cache, bias, jev, settings, ZoneId.systemDefault())
 }
+
+@Retention(AnnotationRetention.BINARY)
+@javax.inject.Qualifier
+annotation class JevHttp
