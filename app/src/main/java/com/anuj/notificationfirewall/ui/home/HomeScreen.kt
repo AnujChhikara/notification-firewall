@@ -39,8 +39,7 @@ import com.anuj.notificationfirewall.ui.NfScreen
 import com.anuj.notificationfirewall.ui.Routes
 import com.anuj.notificationfirewall.ui.SectionLabel
 import com.anuj.notificationfirewall.ui.StatusDot
-import com.anuj.notificationfirewall.ui.bucketColor
-import com.anuj.notificationfirewall.ui.bucketLabel
+import com.anuj.notificationfirewall.domain.wall.WallBucket
 import com.anuj.notificationfirewall.ui.permissions.Permissions
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -71,8 +70,7 @@ class HomeViewModel @Inject constructor(
     val profiles = profileDao.observeProfiles()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val recent = notificationDao.observeAll()
-        .map { it.take(8) }
+    val recent = notificationDao.observeRecent(8)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val hasApiKey: Boolean get() = securePrefs.hasKey
@@ -163,10 +161,24 @@ fun HomeScreen(nav: NavHostController, vm: HomeViewModel = hiltViewModel()) {
 @Composable
 private fun RecentRow(rec: NotificationRecordEntity) {
     NfRow(
-        title = rec.title.ifBlank { rec.appLabel },
-        subtitle = "${rec.appLabel} · ${bucketLabel(rec.bucket)}",
-        dotColor = bucketColor(rec.bucket),
+        title = rec.title?.ifBlank { rec.appLabel } ?: rec.appLabel,
+        subtitle = "${rec.appLabel} · ${wallBucketLabel(rec.bucket)}",
+        dotColor = wallBucketColor(rec.bucket),
     )
+}
+
+// TODO(Task 10): temporary WallBucket display mapping; this screen is
+// rewritten against the wall pipeline.
+private fun wallBucketColor(bucket: WallBucket) = when (bucket) {
+    WallBucket.RING -> NfRang
+    WallBucket.SILENCE -> NfTextMuted
+    WallBucket.DROP -> NfCaptured
+}
+
+private fun wallBucketLabel(bucket: WallBucket) = when (bucket) {
+    WallBucket.RING -> "Rang through"
+    WallBucket.SILENCE -> "Silenced"
+    WallBucket.DROP -> "Dropped"
 }
 
 @Composable

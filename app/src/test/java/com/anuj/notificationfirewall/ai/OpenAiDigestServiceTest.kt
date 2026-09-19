@@ -1,8 +1,8 @@
 package com.anuj.notificationfirewall.ai
 
 import com.anuj.notificationfirewall.data.db.NotificationRecordEntity
-import com.anuj.notificationfirewall.domain.model.BucketAction
-import com.anuj.notificationfirewall.domain.model.DecisionSource
+import com.anuj.notificationfirewall.domain.wall.WallBucket
+import com.anuj.notificationfirewall.domain.wall.WallDecisionSource
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
@@ -22,9 +22,10 @@ class OpenAiDigestServiceTest {
     @After fun teardown() = server.shutdown()
     private fun rec() = NotificationRecordEntity(
         packageName = "com.gmail", appLabel = "Gmail", title = "t", text = "x",
-        timestampEpochMs = 1, senderKey = "promo", activeProfileId = 1, matchedRuleId = null,
-        decisionSource = DecisionSource.DEFAULT, bucket = BucketAction.CAPTURE,
-        aiUrgent = null, aiReason = null, isRead = false)
+        timestampEpochMs = 1, senderKey = "promo", contentShape = "", importanceScore = null,
+        biasApplied = 0f, category = null, isTimeSensitive = null, isFromHuman = null,
+        needsAction = null, jevConfidence = null, decisionSource = WallDecisionSource.LEGACY,
+        bucket = WallBucket.DROP, pendingClassification = false, textPurgedAt = null, isRead = false)
 
     @Test fun empty_input_short_circuits_without_http() = runBlocking {
         val text = service.summarize(emptyList())

@@ -24,11 +24,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.anuj.notificationfirewall.data.db.NotificationRecordEntity
 import com.anuj.notificationfirewall.data.db.dao.NotificationDao
-import com.anuj.notificationfirewall.domain.model.BucketAction
+import com.anuj.notificationfirewall.domain.wall.WallBucket
 import com.anuj.notificationfirewall.ui.NfScreen
 import com.anuj.notificationfirewall.ui.StatusDot
-import com.anuj.notificationfirewall.ui.bucketColor
-import com.anuj.notificationfirewall.ui.bucketLabel
+import com.anuj.notificationfirewall.ui.theme.NfCaptured
+import com.anuj.notificationfirewall.ui.theme.NfRang
+import com.anuj.notificationfirewall.ui.theme.NfSilenced
 import com.anuj.notificationfirewall.ui.theme.NfTextFaint
 import com.anuj.notificationfirewall.ui.theme.NfTextMuted
 import com.anuj.notificationfirewall.ui.theme.NfTitle
@@ -45,9 +46,10 @@ class InboxViewModel @Inject constructor(
 ) : ViewModel() {
 
     // The listener logs every notification; the Inbox shows only the ones we
-    // actually held back (Captured or Silenced).
-    val records = notificationDao.observeAll()
-        .map { all -> all.filter { it.bucket == BucketAction.CAPTURE || it.bucket == BucketAction.SILENCE } }
+    // actually held back (Silenced or Dropped). TODO(Task 10): this screen is
+    // rewritten against the wall pipeline; this is a minimal compile shim.
+    val records = notificationDao.observeRecent(500)
+        .map { all -> all.filter { it.bucket == WallBucket.SILENCE || it.bucket == WallBucket.DROP } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun markRead(id: Long) {
@@ -92,15 +94,15 @@ private fun InboxRow(rec: NotificationRecordEntity, onMarkRead: () -> Unit) {
             .padding(horizontal = 8.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        StatusDot(bucketColor(rec.bucket), size = 8.dp)
+        StatusDot(wallBucketColor(rec.bucket), size = 8.dp)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
-                rec.title.ifBlank { rec.appLabel },
+                rec.title?.ifBlank { rec.appLabel } ?: rec.appLabel,
                 style = MaterialTheme.typography.titleMedium,
                 color = if (rec.isRead) NfTextMuted else NfTitle,
                 fontWeight = if (rec.isRead) FontWeight.Normal else FontWeight.SemiBold,
             )
-            if (rec.text.isNotBlank()) {
+            if (!rec.text.isNullOrBlank()) {
                 Text(
                     rec.text,
                     style = MaterialTheme.typography.bodyMedium,
@@ -109,8 +111,7 @@ private fun InboxRow(rec: NotificationRecordEntity, onMarkRead: () -> Unit) {
                 )
             }
             Text(
-                "${rec.appLabel} · ${bucketLabel(rec.bucket)}" +
-                    (rec.aiReason?.let { " · $it" } ?: ""),
+                "${rec.appLabel} · ${wallBucketLabel(rec.bucket)}",
                 style = MaterialTheme.typography.labelSmall,
                 color = NfTextFaint,
             )
@@ -121,6 +122,20 @@ private fun InboxRow(rec: NotificationRecordEntity, onMarkRead: () -> Unit) {
             color = NfTextFaint,
         )
     }
+}
+
+// TODO(Task 10): temporary WallBucket display mapping; this screen is
+// rewritten against the wall pipeline.
+private fun wallBucketColor(bucket: WallBucket) = when (bucket) {
+    WallBucket.RING -> NfRang
+    WallBucket.SILENCE -> NfSilenced
+    WallBucket.DROP -> NfCaptured
+}
+
+private fun wallBucketLabel(bucket: WallBucket) = when (bucket) {
+    WallBucket.RING -> "Rang through"
+    WallBucket.SILENCE -> "Silenced"
+    WallBucket.DROP -> "Dropped"
 }
 
 private fun relativeTime(epochMs: Long): String {

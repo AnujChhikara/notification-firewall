@@ -11,10 +11,14 @@ import com.anuj.notificationfirewall.ai.OpenAiClient
 import com.anuj.notificationfirewall.ai.OpenAiDigestService
 import com.anuj.notificationfirewall.ai.OpenAiImportanceService
 import com.anuj.notificationfirewall.data.db.MIGRATION_3_4
+import com.anuj.notificationfirewall.data.db.MIGRATION_4_5
 import com.anuj.notificationfirewall.data.db.NfDatabase
 import com.anuj.notificationfirewall.data.db.dao.NotificationDao
+import com.anuj.notificationfirewall.data.db.dao.OverrideDao
 import com.anuj.notificationfirewall.data.db.dao.ProfileDao
 import com.anuj.notificationfirewall.data.db.dao.RuleDao
+import com.anuj.notificationfirewall.data.db.dao.SenderBiasDao
+import com.anuj.notificationfirewall.data.db.dao.VerdictCacheDao
 import com.anuj.notificationfirewall.data.prefs.SecurePrefs
 import com.anuj.notificationfirewall.domain.profile.ProfileManager
 import com.anuj.notificationfirewall.domain.rules.RuleEngine
@@ -60,7 +64,7 @@ object AppModule {
     @Singleton
     fun provideNfDatabase(@ApplicationContext context: Context): NfDatabase =
         Room.databaseBuilder(context, NfDatabase::class.java, DATABASE_NAME)
-            .addMigrations(MIGRATION_3_4)
+            .addMigrations(MIGRATION_3_4, MIGRATION_4_5)
             .build()
 
     @Provides
@@ -71,6 +75,15 @@ object AppModule {
 
     @Provides
     fun provideNotificationDao(db: NfDatabase): NotificationDao = db.notificationDao()
+
+    @Provides
+    fun provideVerdictCacheDao(db: NfDatabase): VerdictCacheDao = db.verdictCacheDao()
+
+    @Provides
+    fun provideSenderBiasDao(db: NfDatabase): SenderBiasDao = db.senderBiasDao()
+
+    @Provides
+    fun provideOverrideDao(db: NfDatabase): OverrideDao = db.overrideDao()
 
     @Provides
     @Singleton
