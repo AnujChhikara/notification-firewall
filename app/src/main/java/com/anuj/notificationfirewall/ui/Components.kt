@@ -232,10 +232,10 @@ fun bucketLabel(bucket: WallBucket): String = when (bucket) {
 
 data class NfNavItem(val route: String, val iconRes: Int, val label: String)
 
-// NOTE(Task 2): route list is still the old two-tab Home/Settings set; Task 2
-// rebuilds this against the new four-tab structure.
 val NfNavItems = listOf(
-    NfNavItem(Routes.HOME, R.drawable.ic_nav_home, "Home"),
+    NfNavItem(Routes.WALL, R.drawable.ic_nav_wall, "Wall"),
+    NfNavItem(Routes.INBOX, R.drawable.ic_nav_inbox, "Inbox"),
+    NfNavItem(Routes.ASK, R.drawable.ic_nav_ask, "Ask"),
     NfNavItem(Routes.SETTINGS, R.drawable.ic_nav_settings, "Settings"),
 )
 

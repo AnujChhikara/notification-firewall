@@ -2,6 +2,7 @@ package com.anuj.notificationfirewall.data.prefs
 
 import android.content.SharedPreferences
 import androidx.core.content.edit
+import com.anuj.notificationfirewall.ui.theme.ThemeMode
 
 /** User-tunable wall policy. Backed by the same encrypted prefs as SecurePrefs. */
 class WallSettings(private val prefs: SharedPreferences) {
@@ -26,11 +27,18 @@ class WallSettings(private val prefs: SharedPreferences) {
             if (value == null) remove(KEY_JEV_API_KEY) else putString(KEY_JEV_API_KEY, value)
         }
 
+    var themeMode: ThemeMode
+        get() = runCatching {
+            ThemeMode.valueOf(prefs.getString(KEY_THEME_MODE, null) ?: ThemeMode.SYSTEM.name)
+        }.getOrDefault(ThemeMode.SYSTEM)
+        set(value) = prefs.edit { putString(KEY_THEME_MODE, value.name) }
+
     private companion object {
         const val KEY_THRESHOLD = "wall_threshold"
         const val KEY_OTP_FAST_PATH = "wall_otp_fast_path"
         const val KEY_TEXT_RETENTION_DAYS = "wall_text_retention_days"
         const val KEY_JEV_API_KEY = "jev_api_key"
+        const val KEY_THEME_MODE = "wall_theme_mode"
         const val DEFAULT_THRESHOLD = 4.0f
         const val DEFAULT_TEXT_RETENTION_DAYS = 30
     }
