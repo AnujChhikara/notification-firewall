@@ -24,6 +24,7 @@ class WallViewModelTest {
     private lateinit var context: Context
     private lateinit var nm: NotificationManager
     private lateinit var db: NfDatabase
+    private lateinit var prefs: SecurePrefs
     private lateinit var arming: ArmingController
     private lateinit var vm: WallViewModel
 
@@ -34,7 +35,7 @@ class WallViewModelTest {
         shadowOf(nm).setNotificationPolicyAccessGranted(true)
         db = Room.inMemoryDatabaseBuilder(context, NfDatabase::class.java)
             .allowMainThreadQueries().build()
-        val prefs = SecurePrefs(context.getSharedPreferences("test-wall-vm", Context.MODE_PRIVATE))
+        prefs = SecurePrefs(context.getSharedPreferences("test-wall-vm", Context.MODE_PRIVATE))
         prefs.listenerConnected = true
         arming = ArmingController(context, DndController(context, prefs), prefs)
         vm = WallViewModel(arming, db.notificationDao())
@@ -88,5 +89,19 @@ class WallViewModelTest {
         shadowOf(nm).setNotificationPolicyAccessGranted(false)
         vm.toggle()
         assertEquals(WallState.BLOCKED_NO_POLICY_ACCESS, vm.ui.value.state)
+    }
+
+    @Test
+    fun togglingWithoutAConnectedListenerDoesNotClaimArmed() = runTest {
+        // Policy access is granted (from setUp), but the listener never
+        // connected -- arm() must refuse before touching DND, and the screen
+        // must render exactly what arm() returned rather than assume success.
+        prefs.listenerConnected = false
+        vm.toggle()
+        assertEquals(
+            "the toggle must never claim armed without a connected listener",
+            WallState.BLOCKED_NO_LISTENER,
+            vm.ui.value.state,
+        )
     }
 }

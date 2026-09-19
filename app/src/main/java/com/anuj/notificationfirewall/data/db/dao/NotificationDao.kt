@@ -77,7 +77,7 @@ interface NotificationDao {
 
     @Query(
         "SELECT bucket, COUNT(*) AS count FROM notifications " +
-            "WHERE timestampEpochMs BETWEEN :startMs AND :endMs GROUP BY bucket",
+            "WHERE timestampEpochMs >= :startMs AND timestampEpochMs < :endMs GROUP BY bucket",
     )
     suspend fun countsForDay(startMs: Long, endMs: Long): List<BucketCount>
 }

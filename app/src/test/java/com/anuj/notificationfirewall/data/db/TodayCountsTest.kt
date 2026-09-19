@@ -73,4 +73,18 @@ class TodayCountsTest {
     fun emptyWindowReturnsNoRows() = runTest {
         assertEquals(0, db.notificationDao().countsForDay(NOW, NOW + 1000).size)
     }
+
+    @Test
+    fun endBoundaryBelongsToTheNextDayNotThisOne() = runTest {
+        // A record landing at exactly midnight (the next day's startMs, which
+        // is this window's endMs) must be counted into the next day only --
+        // the range is half-open, [startMs, endMs), so it never double-counts
+        // across the day boundary.
+        insert(WallBucket.SILENCE, NOW) // inside this window
+        insert(WallBucket.SILENCE, NOW + DAY_MS) // exactly at endMs, belongs to the next day
+
+        val counts = db.notificationDao().countsForDay(NOW, NOW + DAY_MS)
+
+        assertEquals(1, counts.single().count)
+    }
 }
