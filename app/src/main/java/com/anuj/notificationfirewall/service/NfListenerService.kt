@@ -9,7 +9,10 @@ import android.util.Log
 import java.util.concurrent.ConcurrentHashMap
 import com.anuj.notificationfirewall.data.db.NotificationRecordEntity
 import com.anuj.notificationfirewall.data.db.dao.NotificationDao
+import com.anuj.notificationfirewall.domain.model.IncomingNotification
+import com.anuj.notificationfirewall.domain.wall.ContentShape
 import com.anuj.notificationfirewall.domain.wall.WallBucket
+import com.anuj.notificationfirewall.domain.wall.WallDecisionSource
 import com.anuj.notificationfirewall.domain.wall.WallPipeline
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -119,25 +122,17 @@ class NfListenerService : NotificationListenerService() {
     private suspend fun handle(sbn: StatusBarNotification) {
         val incoming = notificationMapper.map(sbn)
 
-        // Disarmed: log for continuity of stats and Ask, but never block or
-        // re-post. Turning DND off means the wall is down, and a down wall does
-        // not touch notifications.
-        val armed = armingController.isArmed()
-
-        val decision = wallPipeline.decide(
-            n = incoming,
-            channelId = sbn.notification.channelId,
-            isReplyCapable = sbn.notification.actions?.any { it.remoteInputs?.isNotEmpty() == true } == true,
-        )
-
-        // Kotlin escape for the NUL byte, not a literal one: same character at
-        // runtime and the same hash input as before, but keeps this file text
-        // (a literal NUL makes git classify the whole file as binary, which
-        // makes every diff of it unreviewable).
-        val signature = (incoming.title + "\u0000" + incoming.text).hashCode()
-        val isNewContent = lastLoggedSignature.put(sbn.key, signature) != signature
-        if (isNewContent) {
-            notificationDao.insert(
+        // Disarmed: a down wall observes but does not judge. It never calls
+        // Jev -- a verdict for a notification the wall won't act on would be
+        // discarded, and worse, a Jev failure while disarmed used to get
+        // stored as bucket=RING/pendingClassification=true, which
+        // ReclassifyWorker would later rewrite from the threshold, turning a
+        // notification that actually rang into a recorded SILENCE. A disarmed
+        // wall also never blocks or re-posts. It still logs the record -- with
+        // contentShape computed locally, at zero Jev cost -- so stats and Ask
+        // stay continuous across arm/disarm.
+        if (!armingController.isArmed()) {
+            logIfNewContent(sbn, incoming) {
                 NotificationRecordEntity(
                     packageName = incoming.packageName,
                     appLabel = incoming.appLabel,
@@ -145,24 +140,78 @@ class NfListenerService : NotificationListenerService() {
                     text = incoming.text,
                     timestampEpochMs = sbn.postTime,
                     senderKey = incoming.senderKey.ifBlank { null },
-                    contentShape = decision.contentShape,
-                    importanceScore = decision.verdict?.importance,
-                    biasApplied = decision.biasApplied,
-                    category = decision.verdict?.category,
-                    isTimeSensitive = decision.verdict?.isTimeSensitive,
-                    isFromHuman = decision.verdict?.isFromHuman,
-                    needsAction = decision.verdict?.needsAction,
-                    jevConfidence = decision.verdict?.confidence,
-                    decisionSource = decision.source,
-                    bucket = if (armed) decision.bucket else WallBucket.RING,
-                    pendingClassification = decision.pendingClassification,
+                    contentShape = ContentShape.of(incoming.title, incoming.text),
+                    importanceScore = null,
+                    biasApplied = 0f,
+                    category = null,
+                    isTimeSensitive = null,
+                    isFromHuman = null,
+                    needsAction = null,
+                    jevConfidence = null,
+                    decisionSource = WallDecisionSource.PENDING,
+                    bucket = WallBucket.RING,
+                    pendingClassification = false,
                     textPurgedAt = null,
                     isRead = false,
-                ),
+                )
+            }
+            return
+        }
+
+        val decision = wallPipeline.decide(
+            n = incoming,
+            channelId = sbn.notification.channelId,
+            isReplyCapable = sbn.notification.actions?.any { it.remoteInputs?.isNotEmpty() == true } == true,
+        )
+
+        logIfNewContent(sbn, incoming) {
+            NotificationRecordEntity(
+                packageName = incoming.packageName,
+                appLabel = incoming.appLabel,
+                title = incoming.title,
+                text = incoming.text,
+                timestampEpochMs = sbn.postTime,
+                senderKey = incoming.senderKey.ifBlank { null },
+                contentShape = decision.contentShape,
+                importanceScore = decision.verdict?.importance,
+                biasApplied = decision.biasApplied,
+                category = decision.verdict?.category,
+                isTimeSensitive = decision.verdict?.isTimeSensitive,
+                isFromHuman = decision.verdict?.isFromHuman,
+                needsAction = decision.verdict?.needsAction,
+                jevConfidence = decision.verdict?.confidence,
+                decisionSource = decision.source,
+                bucket = decision.bucket,
+                pendingClassification = decision.pendingClassification,
+                textPurgedAt = null,
+                isRead = false,
             )
         }
 
-        if (armed) bucketExecutor.execute(decision, sbn)
+        bucketExecutor.execute(decision, sbn)
+    }
+
+    /**
+     * Apps re-post the same notification many times as they update it, which
+     * would otherwise create 4-5 identical Inbox rows; only log a row when the
+     * (title, text) content actually changed since the last log for this key.
+     * [entity] is built lazily so a duplicate never pays for a record it will
+     * throw away.
+     */
+    private suspend fun logIfNewContent(
+        sbn: StatusBarNotification,
+        incoming: IncomingNotification,
+        entity: () -> NotificationRecordEntity,
+    ) {
+        // Kotlin escape for the NUL byte, not a literal one: same character at
+        // runtime and the same hash input as before, but keeps this file text
+        // (a literal NUL makes git classify the whole file as binary, which
+        // makes every diff of it unreviewable).
+        val signature = (incoming.title + "\u0000" + incoming.text).hashCode()
+        val isNewContent = lastLoggedSignature.put(sbn.key, signature) != signature
+        if (isNewContent) {
+            notificationDao.insert(entity())
+        }
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
