@@ -223,9 +223,6 @@ data class NfNavItem(val route: String, val iconRes: Int, val label: String)
 
 val NfNavItems = listOf(
     NfNavItem(Routes.HOME, R.drawable.ic_nav_home, "Home"),
-    NfNavItem(Routes.PROGRAM, R.drawable.ic_nav_program, "Program"),
-    NfNavItem(Routes.RESULTS, R.drawable.ic_nav_results, "Results"),
-    NfNavItem(Routes.PODS, R.drawable.ic_nav_pods, "Pods"),
     NfNavItem(Routes.SETTINGS, R.drawable.ic_nav_settings, "Settings"),
 )
 

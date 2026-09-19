@@ -27,7 +27,6 @@ import com.anuj.notificationfirewall.data.seed.DefaultSeeder
 import com.anuj.notificationfirewall.service.HealthMonitor
 import com.anuj.notificationfirewall.service.ProfileStateReconciler
 import com.anuj.notificationfirewall.work.ProfileScheduler
-import com.anuj.notificationfirewall.ui.analytics.AnalyticsScreen
 import com.anuj.notificationfirewall.ui.welcome.WelcomeScreen
 import com.anuj.notificationfirewall.ui.digest.DigestScreen
 import com.anuj.notificationfirewall.ui.home.HomeScreen
@@ -46,14 +45,9 @@ import javax.inject.Inject
 /** Nav routes. Screens that take an id append it as a path arg. */
 object Routes {
     const val WELCOME = "welcome"
-    const val ASSESSMENT = "assessment"
     const val HOME = "home"
     const val ONBOARDING = "onboarding"
     const val INBOX = "inbox"
-    const val ANALYTICS = "analytics"
-    const val PROGRAM = "program"
-    const val RESULTS = "results"
-    const val PODS = "pods"
     const val PROFILES = "profiles"
     const val SETTINGS = "settings"
     const val DIGEST = "digest"
@@ -115,7 +109,7 @@ private fun NfApp(
     val nav = rememberNavController()
     val currentRoute by nav.currentBackStackEntryAsState()
     val route = currentRoute?.destination?.route
-    val primaryRoutes = setOf(Routes.HOME, Routes.PROGRAM, Routes.RESULTS, Routes.PODS, Routes.SETTINGS)
+    val primaryRoutes = setOf(Routes.HOME, Routes.SETTINGS)
 
     Box(Modifier.fillMaxSize()) {
         NfNavGraph(nav, mainViewModel.startDestination)
@@ -141,14 +135,9 @@ private fun NfApp(
 private fun NfNavGraph(nav: NavHostController, startDestination: String) {
     NavHost(navController = nav, startDestination = startDestination) {
         composable(Routes.WELCOME) { WelcomeScreen(nav) }
-        composable(Routes.ASSESSMENT) { com.anuj.notificationfirewall.ui.assessment.AssessmentScreen(nav) }
         composable(Routes.HOME) { HomeScreen(nav) }
         composable(Routes.ONBOARDING) { OnboardingScreen(nav) }
         composable(Routes.INBOX) { InboxScreen(nav) }
-        composable(Routes.ANALYTICS) { AnalyticsScreen(nav) }
-        composable(Routes.PROGRAM) { com.anuj.notificationfirewall.ui.program.ProgramScreen(nav) }
-        composable(Routes.RESULTS) { com.anuj.notificationfirewall.ui.results.ResultsScreen(nav) }
-        composable(Routes.PODS) { com.anuj.notificationfirewall.ui.pods.PodsScreen(nav) }
         composable(Routes.PROFILES) { ProfilesScreen(nav) }
         composable(Routes.SETTINGS) { SettingsScreen(nav) }
         composable(Routes.DIGEST) { DigestScreen(nav) }

@@ -10,8 +10,8 @@ import com.anuj.notificationfirewall.ai.ImportanceService
 import com.anuj.notificationfirewall.ai.OpenAiClient
 import com.anuj.notificationfirewall.ai.OpenAiDigestService
 import com.anuj.notificationfirewall.ai.OpenAiImportanceService
+import com.anuj.notificationfirewall.data.db.MIGRATION_3_4
 import com.anuj.notificationfirewall.data.db.NfDatabase
-import com.anuj.notificationfirewall.data.db.dao.AssessmentDao
 import com.anuj.notificationfirewall.data.db.dao.NotificationDao
 import com.anuj.notificationfirewall.data.db.dao.ProfileDao
 import com.anuj.notificationfirewall.data.db.dao.RuleDao
@@ -60,9 +60,7 @@ object AppModule {
     @Singleton
     fun provideNfDatabase(@ApplicationContext context: Context): NfDatabase =
         Room.databaseBuilder(context, NfDatabase::class.java, DATABASE_NAME)
-            // M1 has no real user data worth migrating; a schema change just
-            // rebuilds the DB and the seeder re-populates the default profile.
-            .fallbackToDestructiveMigration()
+            .addMigrations(MIGRATION_3_4)
             .build()
 
     @Provides
@@ -73,9 +71,6 @@ object AppModule {
 
     @Provides
     fun provideNotificationDao(db: NfDatabase): NotificationDao = db.notificationDao()
-
-    @Provides
-    fun provideAssessmentDao(db: NfDatabase): AssessmentDao = db.assessmentDao()
 
     @Provides
     @Singleton
