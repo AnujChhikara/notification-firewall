@@ -27,13 +27,19 @@ private const val TAG = "MaintenanceWorker"
  * purge's sake — that work only rides along here because it is cheap and
  * idempotent, not because it needs its own cadence.
  *
- * Each run: stops the keep-alive service if the wall is no longer armed,
- * runs the health check, purges notification text past the retention
- * window, and evicts stale cache entries. Runs in the background so it can't
- * START the keep-alive service — Android forbids starting a foreground
- * service from most background contexts — but stopping one is allowed from
- * anywhere, so this is a safety net against a stale keep-alive outliving a
- * disarm that happened while the app wasn't around to react to it.
+ * Each run: syncs the keep-alive service to the current armed state, runs the
+ * health check, purges notification text past the retention window, and
+ * evicts stale cache entries.
+ *
+ * The keep-alive sync is symmetric — start when armed, stop when not — rather
+ * than stop-only, because [ArmingController.arm]/[ArmingController.disarm]
+ * only react to explicit arm/disarm transitions. If the wall is already armed
+ * and the OS kills the foreground service behind its back (Funtouch OS on the
+ * target hardware does exactly this), nothing else ever restarts it: this
+ * worker is the only thing that runs on a schedule regardless of whether the
+ * app is open. [KeepAliveService.start] self-verifies armed state on every
+ * start and no-ops if not armed, so calling it here on every run — including
+ * when it's already running — is safe and idempotent.
  */
 @HiltWorker
 class MaintenanceWorker @AssistedInject constructor(
@@ -47,7 +53,7 @@ class MaintenanceWorker @AssistedInject constructor(
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
-        if (!armingController.isArmed()) KeepAliveService.stop(appContext)
+        if (armingController.isArmed()) KeepAliveService.start(appContext) else KeepAliveService.stop(appContext)
         healthMonitor.refresh()
 
         // 0 means never purge.
