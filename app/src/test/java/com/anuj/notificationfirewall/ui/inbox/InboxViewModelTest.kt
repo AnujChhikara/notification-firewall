@@ -117,6 +117,12 @@ class InboxViewModelTest {
         )
 
         assertEquals(
+            "the corrected sender must actually receive the bias",
+            -0.25f,
+            bias.biasFor("com.whatsapp", "Promo Group"),
+            0.001f,
+        )
+        assertEquals(
             "a correction on one WhatsApp thread must not touch another",
             0f,
             bias.biasFor("com.whatsapp", "Mom"),
@@ -189,5 +195,53 @@ class InboxViewModelTest {
     fun explanationForOtpDoesNotInventAScore() = runTest {
         val text = InboxViewModel.explain(null, 0f, null, WallDecisionSource.OTP, null)
         assertTrue(text.lowercase().contains("one-time code") || text.lowercase().contains("otp"))
+    }
+
+    // EXPIRED rows have NULL verdict columns by design (retention purged the
+    // text before Jev ever saw it) -- the explanation must say so plainly
+    // rather than formatting a fabricated importance/category/confidence.
+    @Test
+    fun explanationForExpiredDoesNotInventAVerdict() = runTest {
+        val text = InboxViewModel.explain(null, 0f, null, WallDecisionSource.EXPIRED, null)
+        assertTrue(text.lowercase().contains("expired"))
+    }
+
+    // PENDING rows have no verdict yet either -- classification hasn't run.
+    @Test
+    fun explanationForPendingDoesNotInventAVerdict() = runTest {
+        val text = InboxViewModel.explain(null, 0f, null, WallDecisionSource.PENDING, null)
+        assertTrue(text.lowercase().contains("classifier"))
+    }
+
+    // Controller ruling: undo must restore the exact pre-correction bias, not
+    // apply the opposite Correction. At the +-0.75 clamp a same-direction
+    // correction is absorbed (a no-op) -- but the opposite correction is NOT
+    // a no-op, so undoing via inverse correction would move a bias the
+    // original action never touched. This pins that boundary directly.
+    @Test
+    fun undoAtTheClampRestoresExactlyWhereItStartedInsteadOfDriftingOffTheClamp() = runTest {
+        val id = insert()
+        // Three SHOULD_HAVE_BEEN_SILENT corrections of -STEP (0.25) each land
+        // exactly on the -0.75 floor.
+        repeat(3) { vm.correct(row(id), Correction.SHOULD_HAVE_BEEN_SILENT) }
+        assertEquals(-0.75f, bias.biasFor("com.myntra", "Myntra"), 0.001f)
+
+        val previous = vm.biasBefore(row(id))
+        vm.correct(row(id), Correction.SHOULD_HAVE_BEEN_SILENT) // absorbed by the clamp: a no-op
+        assertEquals(
+            "a same-direction correction at the clamp must be a no-op",
+            -0.75f,
+            bias.biasFor("com.myntra", "Myntra"),
+            0.001f,
+        )
+
+        vm.restoreBias(row(id), previous)
+
+        assertEquals(
+            "undoing a no-op correction must not move the bias off the clamp",
+            -0.75f,
+            bias.biasFor("com.myntra", "Myntra"),
+            0.001f,
+        )
     }
 }

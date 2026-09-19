@@ -75,6 +75,28 @@ class InboxViewModel @Inject constructor(
         }
     }
 
+    /**
+     * The bias in effect for this row's sender right now, i.e. immediately
+     * before a caller is about to call [correct]. A caller that wants a
+     * working undo must snapshot this value first and pass it back to
+     * [restoreBias] -- applying the opposite [Correction] is not a true
+     * inverse at the ±[BiasStore.MAX_BIAS] clamp (see [restoreBias]).
+     */
+    suspend fun biasBefore(row: InboxRow): Float = bias.biasFor(row.packageName, row.sender)
+
+    /**
+     * Restores the sender's bias to an exact snapshot taken by [biasBefore],
+     * for undo. Deliberately not "apply the opposite correction": a sender
+     * already sitting at the clamp absorbs a same-direction correction as a
+     * no-op, but the opposite correction is not a no-op -- it would move the
+     * bias a full step away from the clamp, corrupting a value the original
+     * correction never touched. Restoring the snapshot is the only inverse
+     * that is correct at every bias value, clamped or not.
+     */
+    fun restoreBias(row: InboxRow, value: Float) {
+        viewModelScope.launch { bias.restore(row.packageName, row.sender, value) }
+    }
+
     fun addOverride(row: InboxRow, kind: OverrideKind) {
         viewModelScope.launch {
             overrides.add(

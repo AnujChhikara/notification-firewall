@@ -54,6 +54,31 @@ class BiasStore(
 
     suspend fun clear(pkg: String, sender: String) = dao.clear(pkg, sender)
 
+    /**
+     * Overwrites the bias with an exact snapshot value.
+     *
+     * Undo needs this, not another [record] call: applying the opposite
+     * [Correction] is not a true inverse once the sender is sitting at the
+     * ±[MAX_BIAS] clamp -- a same-direction correction there is absorbed
+     * (a no-op), but "undoing" it by applying the opposite correction would
+     * still move the bias a full [STEP] away from the clamp, corrupting a
+     * value the correction never actually touched. Restoring the exact
+     * pre-correction snapshot is the only correct inverse.
+     */
+    suspend fun restore(pkg: String, sender: String?, value: Float) {
+        if (sender.isNullOrBlank()) return
+        val existing = dao.find(pkg, sender)
+        dao.upsert(
+            SenderBiasEntity(
+                packageName = pkg,
+                senderKey = sender,
+                bias = value.coerceIn(-MAX_BIAS, MAX_BIAS),
+                correctionCount = existing?.correctionCount ?: 0,
+                lastCorrectedEpochMs = existing?.lastCorrectedEpochMs ?: clock(),
+            ),
+        )
+    }
+
     companion object {
         const val MAX_BIAS = 0.75f
         const val STEP = 0.25f

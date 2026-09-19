@@ -74,22 +74,23 @@ fun InboxScreen(nav: NavHostController) {
     val snackbarHost = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
+    // Undo restores the exact pre-correction bias rather than applying the
+    // opposite Correction: at the +-0.75 clamp a same-direction correction is
+    // a no-op, but the opposite correction is never a no-op, so "undo via
+    // inverse correction" would move a bias the original action never
+    // touched. The snapshot is taken before vm.correct() runs.
     fun correctWithUndo(row: InboxRow, correction: Correction) {
-        vm.correct(row, correction)
         val label = row.sender ?: row.appLabel
         val verdict = if (correction == Correction.SHOULD_HAVE_BEEN_SILENT) "more harshly" else "more kindly"
         scope.launch {
+            val previousBias = vm.biasBefore(row)
+            vm.correct(row, correction)
             val result = snackbarHost.showSnackbar(
                 message = "Noted — $label will be judged $verdict",
                 actionLabel = "Undo",
             )
             if (result == SnackbarResult.ActionPerformed) {
-                val opposite = if (correction == Correction.SHOULD_HAVE_BEEN_SILENT) {
-                    Correction.SHOULD_HAVE_RUNG
-                } else {
-                    Correction.SHOULD_HAVE_BEEN_SILENT
-                }
-                vm.correct(row, opposite)
+                vm.restoreBias(row, previousBias)
             }
         }
     }
