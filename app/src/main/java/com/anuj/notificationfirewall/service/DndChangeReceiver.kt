@@ -8,13 +8,21 @@ import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
 /**
- * Catches DND changes while the listener service is unbound.
+ * Catches DND changes while this process is alive but the listener service is
+ * not bound.
  *
  * NotificationListenerService.onInterruptionFilterChanged is the primary signal,
- * but it only fires while the listener is connected. This receiver covers the
- * gap: without it, [SecurePrefs.dndSetByApp] ownership is never cleared when the
- * user turns DND off externally while unbound, and a later user-initiated DND
- * would be misreported as ARMED.
+ * but it only fires while the listener is connected. This receiver covers one
+ * part of the gap: without it, [SecurePrefs.dndSetByApp] ownership is never
+ * cleared when the user turns DND off externally while unbound, and a later
+ * user-initiated DND would be misreported as ARMED. It does NOT cover the
+ * window where the process itself has been killed -- a runtime-registered
+ * receiver dies with its process just like anything else in it. That window
+ * is covered separately by the resume reconcile in `NfApplication.onCreate()`
+ * (a `ProcessLifecycleOwner` observer calling `ArmingController.
+ * onSystemDndChanged()` on every app resume, per design spec §6.1), which
+ * runs fresh on the next launch regardless of what happened while the
+ * process was dead.
  *
  * DO NOT register this in AndroidManifest.xml. `ACTION_INTERRUPTION_FILTER_CHANGED`
  * is an implicit broadcast and is NOT on the platform's exemption list for
