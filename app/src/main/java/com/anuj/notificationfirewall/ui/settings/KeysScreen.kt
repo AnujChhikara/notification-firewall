@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.navigation.NavHostController
+import java.util.Locale
 import com.anuj.notificationfirewall.ai.jev.JevClient
 import com.anuj.notificationfirewall.data.prefs.SecurePrefs
 import com.anuj.notificationfirewall.data.prefs.WallSettings
@@ -224,7 +225,7 @@ fun KeysScreen(nav: NavHostController, vm: KeysViewModel = hiltViewModel()) {
                     }
                     when (val outcome = testOutcome) {
                         is TestOutcome.Success -> Text(
-                            "Round trip worked — importance score ${"%.1f".format(outcome.importance)}",
+                            "Round trip worked — importance score ${String.format(Locale.ROOT, "%.1f", outcome.importance)}",
                             style = MaterialTheme.typography.labelMedium,
                             color = NfRang,
                         )

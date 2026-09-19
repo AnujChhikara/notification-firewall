@@ -18,7 +18,7 @@ object KeyMasking {
     /** Returns null when there is nothing stored (null or blank key). */
     fun maskedPreview(key: String?): String? {
         if (key.isNullOrBlank()) return null
-        return if (key.length >= MIN_LEN_FOR_PARTIAL_REVEAL) {
+        return if (key.length > MIN_LEN_FOR_PARTIAL_REVEAL) {
             "${key.take(PREFIX_LEN)}…${key.takeLast(SUFFIX_LEN)}"
         } else {
             "•".repeat(key.length)

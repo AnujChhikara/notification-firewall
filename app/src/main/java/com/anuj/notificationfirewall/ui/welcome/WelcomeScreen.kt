@@ -59,7 +59,7 @@ private data class Slide(val accent: Color, val eyebrow: String, val title: Stri
 
 private val slides = listOf(
     Slide(
-        NfAccent, "Still",
+        NfAccent, "Notification Wall",
         "Only what matters gets through",
         "A calm layer over your notifications. The noise gets held back; the people and messages you care about still reach you.",
     ),

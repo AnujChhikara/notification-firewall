@@ -30,6 +30,7 @@ import androidx.navigation.NavHostController
 import com.anuj.notificationfirewall.data.db.NotificationRecordEntity
 import com.anuj.notificationfirewall.data.db.dao.NotificationDao
 import com.anuj.notificationfirewall.data.prefs.SecurePrefs
+import com.anuj.notificationfirewall.data.prefs.WallSettings
 import com.anuj.notificationfirewall.service.ArmingController
 import com.anuj.notificationfirewall.service.HealthEvaluator
 import com.anuj.notificationfirewall.service.HealthFlags
@@ -65,6 +66,7 @@ class HomeViewModel @Inject constructor(
     private val armingController: ArmingController,
     notificationDao: NotificationDao,
     private val securePrefs: SecurePrefs,
+    private val wallSettings: WallSettings,
 ) : ViewModel() {
 
     val wallState = armingController.observeState()
@@ -73,7 +75,8 @@ class HomeViewModel @Inject constructor(
     val recent = notificationDao.observeRecent(8)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val hasApiKey: Boolean get() = securePrefs.hasKey
+    /** Whether the wall's classifier key is present — drives [Permissions.status]. */
+    val hasApiKey: Boolean get() = !wallSettings.jevKey.isNullOrBlank()
     val listenerConnected: Boolean get() = securePrefs.listenerConnected
 
     fun arm() = armingController.arm()
@@ -119,7 +122,7 @@ fun HomeScreen(nav: NavHostController, vm: HomeViewModel = hiltViewModel()) {
         )
     }
 
-    NfScreen(eyebrow = "Still", title = if (status.coreReady) "Armed" else "Setup needed") { modifier ->
+    NfScreen(eyebrow = "Notification Wall", title = if (status.coreReady) "Armed" else "Setup needed") { modifier ->
         LazyColumn(
             modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
