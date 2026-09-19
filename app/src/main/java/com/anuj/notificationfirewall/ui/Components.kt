@@ -33,17 +33,6 @@ import androidx.compose.ui.unit.dp
 import com.anuj.notificationfirewall.R
 import com.anuj.notificationfirewall.domain.wall.WallBucket
 import com.anuj.notificationfirewall.ui.theme.LocalWallColors
-// NOTE(Task 2): NfBottomBar/NfNavItems below still read the raw Nf* constants
-// from ui/theme/Color.kt rather than LocalWallColors. They are left untouched
-// here because MainActivity.NfApp calls NfBottomBar directly and Task 2 is the
-// task that rebuilds nav against the new four-tab structure -- migrating them
-// now, ahead of that redesign, would be thrown away immediately and deleting
-// them now would break `:app:assembleDebug`, which this task must keep green.
-import com.anuj.notificationfirewall.ui.theme.NfAccentSoft
-import com.anuj.notificationfirewall.ui.theme.NfBorder
-import com.anuj.notificationfirewall.ui.theme.NfSurfaceElevated
-import com.anuj.notificationfirewall.ui.theme.NfText
-import com.anuj.notificationfirewall.ui.theme.NfTextMuted
 
 /**
  * Standard screen chrome: a small muted eyebrow over a big bold title, drawn
@@ -243,6 +232,8 @@ fun bucketLabel(bucket: WallBucket): String = when (bucket) {
 
 data class NfNavItem(val route: String, val iconRes: Int, val label: String)
 
+// NOTE(Task 2): route list is still the old two-tab Home/Settings set; Task 2
+// rebuilds this against the new four-tab structure.
 val NfNavItems = listOf(
     NfNavItem(Routes.HOME, R.drawable.ic_nav_home, "Home"),
     NfNavItem(Routes.SETTINGS, R.drawable.ic_nav_settings, "Settings"),
@@ -251,13 +242,14 @@ val NfNavItems = listOf(
 /** Floating pill navigation for the primary destinations. */
 @Composable
 fun NfBottomBar(currentRoute: String?, onSelect: (String) -> Unit, modifier: Modifier = Modifier) {
+    val c = LocalWallColors.current
     Row(
         modifier
             .navigationBarsPadding()
             .padding(bottom = 14.dp)
             .clip(RoundedCornerShape(26.dp))
-            .background(NfSurfaceElevated)
-            .border(1.dp, NfBorder, RoundedCornerShape(26.dp))
+            .background(c.surfaceElevated)
+            .border(1.dp, c.border, RoundedCornerShape(26.dp))
             .padding(horizontal = 6.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -267,7 +259,7 @@ fun NfBottomBar(currentRoute: String?, onSelect: (String) -> Unit, modifier: Mod
             Box(
                 Modifier
                     .clip(RoundedCornerShape(18.dp))
-                    .background(if (selected) NfAccentSoft else Color.Transparent)
+                    .background(if (selected) c.accentSoft else Color.Transparent)
                     .clickable { onSelect(item.route) }
                     .padding(horizontal = 16.dp, vertical = 9.dp),
                 contentAlignment = Alignment.Center,
@@ -275,7 +267,7 @@ fun NfBottomBar(currentRoute: String?, onSelect: (String) -> Unit, modifier: Mod
                 Icon(
                     painter = painterResource(item.iconRes),
                     contentDescription = item.label,
-                    tint = if (selected) NfText else NfTextMuted,
+                    tint = if (selected) c.text else c.textMuted,
                     modifier = Modifier.size(21.dp),
                 )
             }
