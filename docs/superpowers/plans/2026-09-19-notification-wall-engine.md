@@ -1137,7 +1137,7 @@ Append to `app/src/test/java/com/anuj/notificationfirewall/data/db/MigrationTest
     }
 
     @Test
-    fun migrate4To5_dropsProfileAndRuleTables_andCreatesWallTables() {
+    fun migrate4To5_createsWallTables_andLeavesProfileTablesForTask11() {
         helper.createDatabase(TEST_DB, 4).close()
         val db = helper.runMigrationsAndValidate(TEST_DB, 5, true, MIGRATION_4_5)
 
@@ -1145,8 +1145,10 @@ Append to `app/src/test/java/com/anuj/notificationfirewall/data/db/MigrationTest
             db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='$name'")
                 .use { it.count > 0 }
 
-        assertFalse(tableExists("profiles"))
-        assertFalse(tableExists("rules"))
+        // Still declared entities at v5, so they must still exist or Room's
+        // schema validation fails on open. Task 11 drops them.
+        assertTrue(tableExists("profiles"))
+        assertTrue(tableExists("rules"))
         assertTrue(tableExists("verdict_cache"))
         assertTrue(tableExists("sender_bias"))
         assertTrue(tableExists("overrides"))
@@ -1532,8 +1534,11 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
         db.execSQL("CREATE INDEX index_notifications_packageName ON notifications (packageName)")
         db.execSQL("CREATE INDEX index_notifications_pendingClassification ON notifications (pendingClassification)")
 
-        db.execSQL("DROP TABLE IF EXISTS profiles")
-        db.execSQL("DROP TABLE IF EXISTS rules")
+        // The profiles and rules tables are deliberately NOT dropped here.
+        // ProfileEntity and RuleEntity are still declared on the @Database at
+        // version 5, and Room validates the open database against its declared
+        // schema — dropping a declared table crashes on open. Task 11 drops both
+        // tables in MIGRATION_5_6, in the same version that removes the entities.
 
         db.execSQL(
             """
@@ -1609,7 +1614,7 @@ abstract class NfDatabase : RoomDatabase() {
 }
 ```
 
-`ProfileEntity` and `RuleEntity` stay registered as Room entities for now even though their tables are dropped by the migration — Room recreates them empty, the old pipeline keeps compiling, and Task 11 removes both the entities and the empty tables. This is deliberate: it keeps this task's migration testable without a simultaneous rewrite of the listener.
+`ProfileEntity` and `RuleEntity` stay registered as Room entities for now, and their tables are deliberately left in place by `MIGRATION_4_5`. Room validates the open database against the schema its declared entities describe, so dropping a still-declared table would crash the app on launch. The old pipeline keeps compiling against them, and Task 11 removes the entities and drops the tables together in version 6. This is deliberate: it keeps this task's migration testable without a simultaneous rewrite of the listener.
 
 - [ ] **Step 10: Register the new DAOs in `AppModule`**
 
@@ -2621,7 +2626,7 @@ class WallPipelineTest {
         assertEquals("Myntra", state.app)
         assertEquals("offers", state.channel)
         assertEquals(true, state.isReplyCapable)
-        assertEquals("05:30", state.arrivedAtLocal)
+        assertEquals("03:43", state.arrivedAtLocal)
     }
 
     // ── Cache ────────────────────────────────────────────────────────────────
@@ -2875,7 +2880,7 @@ class WallPipeline(
 ./gradlew :app:testDebugUnitTest --tests "*WallPipelineTest*"
 ```
 
-Expected: PASS, 22 tests. If `jevReceivesTheLocalSignals` fails on the expected time, confirm the fixture instant `1_700_000_000_000` renders as `05:30` in `Asia/Kolkata` and adjust the expectation to the actual value rather than changing the zone.
+Expected: PASS, 22 tests. The fixture instant `1_700_000_000_000` is 2023-11-14T22:13:20Z, which is `03:43` in `Asia/Kolkata` — that is why `jevReceivesTheLocalSignals` expects that string. If it fails on the time, fix the expectation to the actual rendered value rather than changing the zone.
 
 - [ ] **Step 7: Run the full suite**
 
