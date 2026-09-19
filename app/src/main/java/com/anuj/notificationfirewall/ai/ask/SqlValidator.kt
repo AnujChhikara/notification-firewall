@@ -19,22 +19,32 @@ sealed interface SqlVerdict {
  * question is not "have I thought of every bad statement" but "have I permitted
  * only the good ones".
  *
- * The content-leak guard is not a bare `contains("*")`: that would also reject
- * `COUNT(*)`, which is a legitimate aggregate. Instead it specifically rejects
- * a bare or qualified star *projection* (`SELECT *`, `SELECT  *`, `SELECT\n*`,
- * `SELECT n.*`, `SELECT *FROM` with no separating space, including one among
- * several projected columns) and rejects whole-word references to the
- * `title`/`text` columns anywhere in the statement — while leaving
- * `COUNT(*)`, `COUNT( * )`, and identifiers that merely contain "title" or
- * "text" as a substring (e.g. `titles`, or a string literal like
- * `'com.title.app'`) untouched.
- *
  * Double quotes, backticks and square brackets are rejected outright rather
  * than masked like single-quoted literals: SQLite accepts any of them as
  * identifier quoting, and an identifier can contain almost anything —
- * including a `(` or `,` that would otherwise defeat the paren-depth and
- * comma-join checks below. Nothing this feature's schema needs requires
- * quoting an identifier, so the whole class is refused up front.
+ * including a `(` or `,` that would defeat the paren-depth and comma-join
+ * checks below. Nothing this feature's schema needs requires quoting an
+ * identifier, so the whole class is refused up front.
+ *
+ * The star-projection check reads the output of a single top-level parse
+ * ([findTopLevelProjection]) instead of re-deriving "where does the real
+ * projection end" with its own regex — two separate leaks in earlier
+ * revisions of this file traced back to exactly that kind of re-derivation
+ * going wrong (a whitespace assumption between the projection and FROM, and
+ * a first-`from`-anywhere scan that landed inside a subquery's parentheses
+ * and truncated the projection before the real star was ever seen).
+ *
+ * The comma-join check ([hasCommaInAnyFromClause]) deliberately does *not*
+ * share that "top level" notion. A comma join can hide inside any `FROM`
+ * anywhere in the statement — the outermost one, or one nested inside a
+ * WHERE/HAVING subquery, or one nested inside a subquery embedded in the
+ * projection — and each occurrence needs the same check applied to its own
+ * local table clause, independent of how deeply it's nested. Tying comma
+ * detection to a single "the" top-level FROM (as an earlier revision did)
+ * is what let a comma join inside a projection subquery defeat the guard
+ * entirely, since the scanner started counting parenthesis depth from the
+ * position of first `from` found — which could itself be inside a subquery
+ * — rather than from each occurrence's own start.
  */
 object SqlValidator {
 
@@ -78,38 +88,6 @@ object SqlValidator {
     private val STRING_LITERAL = Regex("""'[^']*'""")
     private fun maskLiterals(s: String) = STRING_LITERAL.replace(s) { " ".repeat(it.value.length) }
 
-    // `FROM_OR_JOIN` only captures the single identifier right after `from`/
-    // `join`, so `FROM notifications, evil_table` would smuggle a second,
-    // unchecked table past it via the old-style comma join. Comma joins are
-    // simply not supported: if a top-level comma (i.e. not inside a
-    // parenthesised subquery or IN-list) appears anywhere between `from` and
-    // the next clause (where/group/order/limit) or the end of the statement,
-    // reject outright rather than risk missing a table.
-    private fun hasTopLevelCommaInFromClause(text: String): Boolean {
-        val fromEnd = FROM_KEYWORD.find(text)?.range?.last?.plus(1) ?: return false
-        var depth = 0
-        var i = fromEnd
-        while (i < text.length) {
-            val c = text[i]
-            when (c) {
-                '(' -> depth++
-                ')' -> depth--
-            }
-            if (depth == 0) {
-                if (c == ',') return true
-                if (c.isLetter() && (i == 0 || !text[i - 1].isLetterOrDigit() && text[i - 1] != '_')) {
-                    val word = CLAUSE_STOP_WORDS.firstOrNull { stop ->
-                        text.regionMatches(i, stop, 0, stop.length) &&
-                            (i + stop.length == text.length || !text[i + stop.length].isLetterOrDigit() && text[i + stop.length] != '_')
-                    }
-                    if (word != null) return false
-                }
-            }
-            i++
-        }
-        return false
-    }
-
     private fun hasUnbalancedParens(text: String): Boolean {
         var depth = 0
         for (c in text) {
@@ -124,15 +102,120 @@ object SqlValidator {
         return depth != 0
     }
 
-    // The projection is everything between the leading SELECT and the first
-    // top-level FROM. A star there — bare or qualified (`t.*`), alone or
-    // alongside other columns — would expand to include title/text. The
-    // boundary is `\b`, not `\s+`: `SELECT *FROM notifications` has no space
-    // between the star and FROM, and a whitespace-requiring boundary would
-    // fail to match at all, silently falling back to an empty projection and
-    // letting the star through unchecked.
-    private val PROJECTION = Regex("""^select\b(.*?)\bfrom\b""", RegexOption.DOT_MATCHES_ALL)
-    private val STAR_PROJECTION = Regex("""(?:^|,)\s*(?:[a-z_][a-z0-9_]*\.)?\*\s*(?:,|$)""")
+    // A leading DISTINCT/ALL quantifier is a SELECT-level modifier, not part
+    // of any projected column; it must be stripped before the projection is
+    // inspected for a star, or `SELECT DISTINCT *` would fail to be
+    // recognised as `SELECT *` in disguise.
+    private val QUANTIFIER_PREFIX = Regex("""^\s*(?:distinct|all)\b\s*""", RegexOption.IGNORE_CASE)
+
+    // A single top-level projected item is a content-column leak only if,
+    // once trimmed, it is *exactly* a bare or table-qualified star -- `*`,
+    // `n.*`, or `n .*` with arbitrary space around the dot. `COUNT(*)` never
+    // matches this because of the surrounding `count(` / `)`.
+    private val STAR_ITEM = Regex("""^(?:[a-z_][a-z0-9_]*\s*\.\s*)?\*$""")
+
+    // Splits on commas that sit at paren depth 0 relative to the start of the
+    // given string -- i.e. it will not split inside `(SELECT COUNT(*) FROM t)`
+    // or an `IN (a, b)` list. Callers only ever pass a substring already known
+    // to be internally balanced (the whole statement passed
+    // hasUnbalancedParens first), so this never needs to handle negative depth.
+    private fun splitTopLevel(s: String): List<String> {
+        val items = mutableListOf<String>()
+        var depth = 0
+        var start = 0
+        for (idx in s.indices) {
+            when (s[idx]) {
+                '(' -> depth++
+                ')' -> depth--
+                ',' -> if (depth == 0) {
+                    items.add(s.substring(start, idx))
+                    start = idx + 1
+                }
+            }
+        }
+        items.add(s.substring(start))
+        return items
+    }
+
+    private fun boundaryBefore(text: String, pos: Int) =
+        pos <= 0 || (!text[pos - 1].isLetterOrDigit() && text[pos - 1] != '_')
+    private fun boundaryAfter(text: String, pos: Int) =
+        pos >= text.length || (!text[pos].isLetterOrDigit() && text[pos] != '_')
+    private fun keywordAt(text: String, pos: Int, word: String) =
+        pos + word.length <= text.length &&
+            text.regionMatches(pos, word, 0, word.length) &&
+            boundaryBefore(text, pos) &&
+            boundaryAfter(text, pos + word.length)
+
+    /**
+     * The projection: the raw text between `select` and the statement's
+     * *top-level* `from` — the one that actually determines what the outer
+     * SELECT reads, as opposed to one nested inside a parenthesised
+     * subquery embedded in the projection itself (depth > 0), which must be
+     * skipped when locating this boundary. Returns `null` if no top-level
+     * FROM is found, or if depth ever goes negative during the scan (which
+     * should not happen once [hasUnbalancedParens] has already passed on
+     * the whole statement, but is treated as a hard parse failure rather
+     * than continuing with a depth counter that can no longer be trusted).
+     */
+    private fun findTopLevelProjection(masked: String): String? {
+        val selectEnd = SELECT_START.find(masked)?.range?.last?.plus(1) ?: return null
+        val n = masked.length
+
+        var depth = 0
+        var j = selectEnd
+        while (j < n) {
+            when (masked[j]) {
+                '(' -> depth++
+                ')' -> {
+                    depth--
+                    if (depth < 0) return null
+                }
+            }
+            if (depth == 0 && keywordAt(masked, j, "from")) {
+                return masked.substring(selectEnd, j)
+            }
+            j++
+        }
+        return null
+    }
+
+    /**
+     * A comma join can hide inside *any* `FROM` in the statement, not just
+     * the outermost one — including one nested inside a WHERE/HAVING
+     * subquery, or one nested inside a subquery embedded in the projection.
+     * Every occurrence of the `from` keyword gets its own independent scan
+     * of its own local table clause, starting its own depth counter at 0
+     * from right after that particular `from`: the scan for one occurrence
+     * ends either at a stop word (where/group/order/limit) found at that
+     * occurrence's own depth 0, or when depth goes negative (meaning the
+     * scan has exited back through the paren that was enclosing this
+     * particular `from`, i.e. reached the end of its own clause). A comma
+     * found at depth 0 during any one occurrence's scan is a comma join,
+     * regardless of where in the statement that `from` sits.
+     */
+    private fun hasCommaInAnyFromClause(masked: String): Boolean {
+        for (match in FROM_KEYWORD.findAll(masked)) {
+            var depth = 0
+            var i = match.range.last + 1
+            while (i < masked.length) {
+                val c = masked[i]
+                when (c) {
+                    '(' -> depth++
+                    ')' -> {
+                        depth--
+                        if (depth < 0) break
+                    }
+                }
+                if (depth == 0) {
+                    if (c == ',') return true
+                    if (CLAUSE_STOP_WORDS.any { keywordAt(masked, i, it) }) break
+                }
+                i++
+            }
+        }
+        return false
+    }
 
     fun validate(raw: String, allowContent: Boolean): SqlVerdict {
         val sql = raw.trim().replace(FENCE, "").trim().removeSuffix(";").trim()
@@ -164,7 +247,7 @@ object SqlValidator {
         FORBIDDEN_PATTERNS.firstOrNull { (_, pattern) -> pattern.containsMatchIn(masked) }
             ?.let { (word, _) -> return SqlVerdict.Rejected("Forbidden keyword: $word") }
 
-        if (hasTopLevelCommaInFromClause(masked)) {
+        if (hasCommaInAnyFromClause(masked)) {
             return SqlVerdict.Rejected("Comma joins are not supported; use JOIN")
         }
 
@@ -174,10 +257,11 @@ object SqlValidator {
             ?.let { return SqlVerdict.Rejected("Unknown table: $it") }
 
         if (!allowContent) {
-            val projectionMatch = PROJECTION.find(masked)
+            val projection = findTopLevelProjection(masked)
                 ?: return SqlVerdict.Rejected("Could not determine the SELECT projection")
-            val projection = projectionMatch.groupValues[1]
-            if (STAR_PROJECTION.containsMatchIn(projection)) {
+            val body = QUANTIFIER_PREFIX.replaceFirst(projection, "")
+            val isStarProjection = splitTopLevel(body).any { STAR_ITEM.matches(it.trim()) }
+            if (isStarProjection) {
                 return SqlVerdict.Rejected("SELECT * would expose notification content")
             }
             CONTENT_COLUMNS.firstOrNull { Regex("""\b$it\b""").containsMatchIn(masked) }

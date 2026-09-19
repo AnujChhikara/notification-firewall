@@ -265,6 +265,141 @@ class SqlValidatorTest {
         rejectedBecause("SELECT\t*\tFROM notifications LIMIT 5", "SELECT *", content = false)
     }
 
+    // ── Critical A (re-review fix): star-projection class still had siblings ──
+    // A DISTINCT/ALL quantifier before the star, whitespace inside a
+    // qualified star's dot, and a subquery embedded in the projection (which
+    // truncated the old regex-based projection extraction before the real,
+    // later star was ever seen) all escaped the Critical-1 fix.
+
+    @Test
+    fun distinctStarIsRejectedWithoutContent() {
+        rejectedBecause("SELECT DISTINCT * FROM notifications LIMIT 5", "SELECT *", content = false)
+    }
+
+    @Test
+    fun allStarIsRejectedWithoutContent() {
+        rejectedBecause("SELECT ALL * FROM notifications LIMIT 5", "SELECT *", content = false)
+    }
+
+    @Test
+    fun distinctQualifiedStarIsRejectedWithoutContent() {
+        rejectedBecause("SELECT DISTINCT n.* FROM notifications n LIMIT 5", "SELECT *", content = false)
+    }
+
+    @Test
+    fun spaceBeforeTheDotInAQualifiedStarIsStillRejectedWithoutContent() {
+        rejectedBecause("SELECT n .* FROM notifications n LIMIT 5", "SELECT *", content = false)
+    }
+
+    @Test
+    fun starAfterASubqueryInTheProjectionIsRejectedWithoutContent() {
+        // The subquery's own FROM must not be mistaken for the top-level FROM
+        // that ends the projection -- if it is, the projection is truncated
+        // before the real, trailing "*" is ever seen.
+        rejectedBecause(
+            "SELECT (SELECT COUNT(*) FROM notifications) AS c, * FROM notifications LIMIT 5",
+            "SELECT *",
+            content = false,
+        )
+    }
+
+    @Test
+    fun distinctWithoutAStarIsStillAllowed() {
+        // The DISTINCT/ALL-stripping fix must not turn into a false rejection
+        // of a legitimate, star-free DISTINCT query.
+        assertTrue(allowed("SELECT DISTINCT packageName FROM notifications LIMIT 5", content = false))
+    }
+
+    @Test
+    fun aggregateSubqueryInTheProjectionWithoutATrailingStarIsAllowed() {
+        // Sibling check: a subquery in the projection is fine on its own; the
+        // rejection above is specifically about the star that follows it.
+        assertTrue(
+            allowed(
+                "SELECT (SELECT COUNT(*) FROM notifications) AS c, packageName FROM notifications LIMIT 5",
+                content = false,
+            ),
+        )
+    }
+
+    // ── Critical B (re-review fix): comma-join guard reopened by depth==0 ─────
+    // A parenthesised subquery *inside the projection* (before the real,
+    // top-level FROM) has its own internal FROM. The old comma scanner always
+    // located the *first* "from" anywhere in the statement as its start point
+    // -- landing inside that subquery's parentheses -- so its local depth
+    // count went negative on the subquery's closing paren and the comma
+    // check that follows (guarded by depth == 0) could never fire again for
+    // the rest of the statement.
+
+    @Test
+    fun commaJoinAfterASubqueryInTheProjectionIsRejected() {
+        rejectedBecause(
+            "SELECT (SELECT 1 FROM notifications) AS x, locale FROM notifications, android_metadata LIMIT 5",
+            "Comma joins",
+        )
+    }
+
+    @Test
+    fun joinAfterASubqueryInTheProjectionIsStillAllowed() {
+        // Sibling: the same subquery-in-projection shape, but a proper JOIN
+        // instead of a comma join, must not be caught by the fix above.
+        assertTrue(
+            allowed(
+                "SELECT (SELECT COUNT(*) FROM notifications) AS c, b.bias FROM notifications n " +
+                    "JOIN sender_bias b ON b.packageName = n.packageName LIMIT 5",
+            ),
+        )
+    }
+
+    @Test
+    fun noCommaJoinAfterASubqueryInTheProjectionIsAllowed() {
+        // Sibling: a subquery in the projection with a single, ordinary table
+        // and no comma at all must not be wrongly flagged either.
+        assertTrue(
+            allowed("SELECT (SELECT COUNT(*) FROM notifications) AS c, locale FROM notifications LIMIT 5"),
+        )
+    }
+
+    // ── Found during self-review, siblings of Critical B: a comma join can
+    // hide inside *any* FROM in the statement, not just the outermost one --
+    // including one nested in a WHERE-clause subquery that never touches the
+    // top-level table clause at all. Scoping the comma check to only "the"
+    // top-level FROM (as the first fix for Critical B did) would still miss
+    // these; the fix generalises to every FROM occurrence independently.
+
+    @Test
+    fun commaJoinInsideAWhereClauseSubqueryIsRejected() {
+        rejectedBecause(
+            "SELECT packageName FROM notifications WHERE packageName IN " +
+                "(SELECT x FROM overrides, android_metadata) LIMIT 5",
+            "Comma joins",
+        )
+    }
+
+    @Test
+    fun properJoinInsideAWhereClauseSubqueryIsStillAllowed() {
+        assertTrue(
+            allowed(
+                "SELECT packageName FROM notifications WHERE packageName IN " +
+                    "(SELECT o.packageName FROM overrides o JOIN sender_bias b ON b.packageName = o.packageName) LIMIT 5",
+            ),
+        )
+    }
+
+    @Test
+    fun doublyNestedSubqueryInTheProjectionWithATrailingStarIsStillRejected() {
+        rejectedBecause(
+            "SELECT (SELECT (SELECT COUNT(*) FROM notifications)) AS c, * FROM notifications LIMIT 5",
+            "SELECT *",
+            content = false,
+        )
+    }
+
+    @Test
+    fun tabsAndDistinctCombinedBeforeTheStarAreStillRejectedWithoutContent() {
+        rejectedBecause("SELECT\tDISTINCT\t*\tFROM notifications LIMIT 5", "SELECT *", content = false)
+    }
+
     // ── P7: bare-substring traps for the content-column guard ─────────────────
 
     @Test
