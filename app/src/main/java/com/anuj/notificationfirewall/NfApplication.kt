@@ -7,7 +7,7 @@ import androidx.core.content.ContextCompat
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import com.anuj.notificationfirewall.service.DndChangeReceiver
-import com.anuj.notificationfirewall.work.MaintenanceWorker
+import com.anuj.notificationfirewall.work.WallWorkScheduler
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
 
@@ -26,8 +26,12 @@ class NfApplication : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
-        // Periodic safety net: reconcile state, re-arm alarms, health-check.
-        MaintenanceWorker.schedule(this)
+        // Registers the wall's background jobs: the network-constrained
+        // re-classification worker, and the periodic maintenance worker
+        // (safety net for keep-alive state, health-check, text retention,
+        // and cache eviction). Idempotent, so calling it on every app start
+        // is safe.
+        WallWorkScheduler.scheduleAll(this)
 
         // DndChangeReceiver must be registered at runtime, not in the manifest:
         // see the KDoc on DndChangeReceiver for why.
