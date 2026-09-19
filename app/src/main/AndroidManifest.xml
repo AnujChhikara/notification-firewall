@@ -92,17 +92,6 @@
             </intent-filter>
         </receiver>
 
-        <!-- Catches system DND changes while the notification listener is
-             unbound, so the wall's reported armed state cannot drift during a
-             rebind. See ArmingController / DndChangeReceiver. -->
-        <receiver
-            android:name=".service.DndChangeReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.app.action.INTERRUPTION_FILTER_CHANGED" />
-            </intent-filter>
-        </receiver>
-
         <!-- WorkManager on-demand initialization: remove the default
              initializer so our Hilt-aware Configuration.Provider (NfApplication)
              supplies the HiltWorkerFactory for DigestWorker. -->
