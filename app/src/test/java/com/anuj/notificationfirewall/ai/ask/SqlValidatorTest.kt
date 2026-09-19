@@ -651,7 +651,8 @@ class SqlValidatorTest {
     // own clause) nor FROM_OR_JOIN (which requires a bare identifier right
     // after from/join, not a paren) ever sees. Confirmed against real SQLite
     // to return data from the unvetted table. Fix: a `(` directly after
-    // from/join is only permitted when a `select` follows it.
+    // from/join is only permitted when it opens an ordinary subquery (see
+    // the round-4 block at the end of this file for the refinement).
 
     @Test
     fun parenthesisedJoinClauseWithAnUnvettedTableIsRejected() {
@@ -719,6 +720,215 @@ class SqlValidatorTest {
             allowed(
                 "SELECT n.appLabel, b.bias FROM notifications n " +
                     "JOIN (SELECT packageName, bias FROM sender_bias) b ON b.packageName = n.packageName LIMIT 5",
+            ),
+        )
+    }
+
+
+    // ── Round 4: a subquery used as a decoy inside a parenthesised join clause ──
+    // `( join-clause )` is a table-or-subquery, and `(SELECT 1)` is itself a
+    // valid table-or-subquery, so `( (SELECT 1) , unvetted )` is a
+    // parenthesised join clause whose *first* token is a paren opening a
+    // subquery. The previous guard skipped nested `(` unconditionally before
+    // looking for `select`, so it found the inner group's `select` and waved
+    // the whole thing through; the comma sat at depth 1 relative to the outer
+    // FROM, so the comma-join scan never saw it either, and no bare identifier
+    // followed from/join, so the table allow-list never saw the table.
+    // Confirmed ALLOWED against the compiled validator and executed against
+    // real SQLite, returning the unvetted table's rows.
+    //
+    // Fix: a wrapping group (one whose first token is another `(`) introduces
+    // no table of its own, so it must contain no comma at its own top level.
+    // Only the innermost, `select`-opening group may contain commas.
+
+    @Test
+    fun subqueryDecoyInAParenthesisedJoinClauseIsRejected() {
+        rejectedBecause(
+            "SELECT locale FROM notifications JOIN ((SELECT 1), android_metadata) LIMIT 5",
+            "parenthesised join clause",
+        )
+    }
+
+    @Test
+    fun subqueryDecoyReachingRoomMasterTableIsRejected() {
+        rejectedBecause(
+            "SELECT identity_hash FROM notifications JOIN ((SELECT 1), room_master_table) LIMIT 5",
+            "parenthesised join clause",
+        )
+    }
+
+    @Test
+    fun subqueryDecoyReachingAnArbitraryTableIsRejected() {
+        rejectedBecause(
+            "SELECT k FROM notifications JOIN ((SELECT 1), secrets) LIMIT 5",
+            "parenthesised join clause",
+        )
+    }
+
+    @Test
+    fun aliasedSubqueryDecoyWithAnAliasedUnvettedTableIsRejected() {
+        rejectedBecause(
+            "SELECT n.appLabel, m.locale FROM notifications n " +
+                "JOIN ((SELECT 1 AS k), android_metadata m) LIMIT 5",
+            "parenthesised join clause",
+        )
+    }
+
+    @Test
+    fun subqueryDecoyWithNoSpaceAnywhereIsRejected() {
+        rejectedBecause(
+            "SELECT locale FROM notifications JOIN((SELECT 1),android_metadata) LIMIT 5",
+            "parenthesised join clause",
+        )
+    }
+
+    @Test
+    fun subqueryDecoyWithANewlineBeforeTheCommaIsRejected() {
+        rejectedBecause(
+            "SELECT locale FROM notifications JOIN ( (SELECT 1)\n, android_metadata ) LIMIT 5",
+            "parenthesised join clause",
+        )
+    }
+
+    @Test
+    fun subqueryDecoyWithTabsAroundTheCommaIsRejected() {
+        rejectedBecause(
+            "SELECT locale FROM notifications JOIN (\t(SELECT 1),\tandroid_metadata) LIMIT 5",
+            "parenthesised join clause",
+        )
+    }
+
+    @Test
+    fun subqueryDecoyWithAliasesOnBothSidesIsRejected() {
+        rejectedBecause(
+            "SELECT locale FROM notifications JOIN ((SELECT 1) AS z, android_metadata AS m) LIMIT 5",
+            "parenthesised join clause",
+        )
+    }
+
+    @Test
+    fun subqueryDecoyWithTheUnvettedTableItselfParenthesisedIsRejected() {
+        rejectedBecause(
+            "SELECT locale FROM notifications JOIN ((SELECT 1), (android_metadata)) LIMIT 5",
+            "parenthesised join clause",
+        )
+    }
+
+    @Test
+    fun subqueryDecoyWithTheUnvettedTableFirstIsRejected() {
+        rejectedBecause(
+            "SELECT locale FROM notifications JOIN (android_metadata, (SELECT 1)) LIMIT 5",
+            "parenthesised join clause",
+        )
+    }
+
+    @Test
+    fun triplyNestedSubqueryDecoyIsRejected() {
+        rejectedBecause(
+            "SELECT locale FROM notifications JOIN (((SELECT 1), android_metadata)) LIMIT 5",
+            "parenthesised join clause",
+        )
+    }
+
+    @Test
+    fun quadruplyNestedSubqueryDecoyIsRejected() {
+        rejectedBecause(
+            "SELECT locale FROM notifications JOIN ((((SELECT 1), android_metadata))) LIMIT 5",
+            "parenthesised join clause",
+        )
+    }
+
+    @Test
+    fun subqueryDecoyAfterCrossJoinIsRejected() {
+        rejectedBecause(
+            "SELECT locale FROM notifications CROSS JOIN ((SELECT 1), android_metadata) LIMIT 5",
+            "parenthesised join clause",
+        )
+    }
+
+    @Test
+    fun subqueryDecoyDirectlyAfterFromIsRejected() {
+        rejectedBecause(
+            "SELECT locale FROM ((SELECT 1), android_metadata) LIMIT 5",
+            "parenthesised join clause",
+        )
+    }
+
+    @Test
+    fun subqueryDecoyWithAFullClauseTailIsRejected() {
+        rejectedBecause(
+            "SELECT m.locale FROM notifications n JOIN ((SELECT 1 AS k), android_metadata m) " +
+                "ON 1=1 WHERE n.id > 0 GROUP BY m.locale HAVING COUNT(*) > 0 LIMIT 5",
+            "parenthesised join clause",
+        )
+    }
+
+    @Test
+    fun subqueryDecoyNestedInsideAWhereClauseSubqueryIsRejected() {
+        rejectedBecause(
+            "SELECT packageName FROM notifications WHERE id IN " +
+                "(SELECT 1 FROM notifications JOIN ((SELECT 1), android_metadata)) LIMIT 5",
+            "parenthesised join clause",
+        )
+    }
+
+    @Test
+    fun subqueryDecoyJoiningThreeItemsIsRejected() {
+        rejectedBecause(
+            "SELECT locale FROM notifications JOIN ((SELECT 1), android_metadata, secrets) LIMIT 5",
+            "parenthesised join clause",
+        )
+    }
+
+    @Test
+    fun subqueryDecoyWhoseFirstGroupSelectsFromAKnownTableIsRejected() {
+        rejectedBecause(
+            "SELECT locale FROM notifications JOIN ((SELECT 1 FROM notifications), android_metadata) LIMIT 5",
+            "parenthesised join clause",
+        )
+    }
+
+    @Test
+    fun twoParenthesisedSubqueriesJoinedByACommaAreRejected() {
+        // Both sides are subqueries, so nothing unvetted is reached here --
+        // but it is still a parenthesised join clause, and the guard must not
+        // depend on recognising which side is the dangerous one.
+        rejectedBecause(
+            "SELECT locale FROM notifications JOIN ((SELECT 1) , (SELECT 2)) LIMIT 5",
+            "parenthesised join clause",
+        )
+    }
+
+    @Test
+    fun aWrappedBareTableIsRejected() {
+        rejectedBecause(
+            "SELECT locale FROM notifications JOIN ((android_metadata)) LIMIT 5",
+            "parenthesised join clause",
+        )
+    }
+
+    // ── No overcorrection: legitimate parenthesised subqueries still pass ────
+
+    @Test
+    fun triplyWrappedSubqueryAfterFromIsStillAllowed() {
+        assertTrue(allowed("SELECT c FROM (((SELECT COUNT(*) AS c FROM notifications))) LIMIT 5"))
+    }
+
+    @Test
+    fun aWrappedSubqueryWhoseOwnProjectionHasCommasIsStillAllowed() {
+        // The commas here belong to the innermost group's own projection, not
+        // to any join -- the no-comma rule applies only to wrapping groups.
+        assertTrue(
+            allowed("SELECT x FROM ((SELECT packageName AS x, appLabel AS y FROM notifications)) LIMIT 5"),
+        )
+    }
+
+    @Test
+    fun aWrappedSubqueryContainingANestedScalarSubqueryIsStillAllowed() {
+        assertTrue(
+            allowed(
+                "SELECT a FROM ((SELECT packageName AS a, " +
+                    "(SELECT COUNT(*) FROM overrides) AS b FROM notifications)) LIMIT 5",
             ),
         )
     }

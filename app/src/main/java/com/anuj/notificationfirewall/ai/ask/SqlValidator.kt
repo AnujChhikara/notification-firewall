@@ -233,19 +233,62 @@ object SqlValidator {
      * a `FROM` keyword's own clause) nor [FROM_OR_JOIN] (which requires a
      * bare identifier immediately after `from`/`join`, not a `(`) ever sees
      * it. Rather than teach either of those checks about this grammar rule,
-     * a `(` directly following `from`/`join` is only ever permitted when the
-     * first keyword inside it — after skipping whitespace and any further
-     * immediately-nested `(` (the doubly-parenthesised form) — is `select`,
-     * i.e. an ordinary subquery. Anything else (a bare table list, an alias,
-     * another join clause) is rejected outright.
+     * a `(` directly following `from`/`join` is only ever permitted when it
+     * opens an ordinary subquery — see [parenGroupIsSubquery]. Anything else
+     * (a bare table list, an alias, another join clause) is rejected outright.
      */
-    private fun hasNonSubqueryParenAfterFromOrJoin(masked: String): Boolean {
-        for (match in FROM_OR_JOIN_PAREN.findAll(masked)) {
-            var idx = match.range.last + 1 // just past the '(' this match ended on
-            while (idx < masked.length && (masked[idx].isWhitespace() || masked[idx] == '(')) {
-                idx++
+    private fun hasNonSubqueryParenAfterFromOrJoin(masked: String): Boolean =
+        FROM_OR_JOIN_PAREN.findAll(masked).any { !parenGroupIsSubquery(masked, it.range.last) }
+
+    /**
+     * Is the group opened by the `(` at [openParenIdx] an ordinary subquery?
+     *
+     * Yes if its first non-whitespace token is `select`. A group whose first
+     * token is instead another `(` is a *wrapping* group — `((SELECT …))`,
+     * the redundantly-parenthesised subquery form — and is walked into. But a
+     * wrapping group introduces no table of its own, so the only thing a
+     * comma at that group's own top level can be doing is joining something
+     * else to the group it wraps: `((SELECT 1), unvetted_table)` is a
+     * parenthesised join clause wearing a subquery's hat. An earlier revision
+     * skipped nested `(` unconditionally and then looked for `select`, which
+     * that shape satisfies — the `select` it found belonged to the inner
+     * group, not to the outer one that actually holds the join. So every
+     * wrapping group traversed on the way in must itself be comma-free; only
+     * the innermost, `select`-opening group may contain commas, since those
+     * are its own projection's.
+     *
+     * Iterative rather than recursive: the nesting depth is attacker-chosen.
+     */
+    private fun parenGroupIsSubquery(masked: String, openParenIdx: Int): Boolean {
+        var open = openParenIdx
+        while (true) {
+            var idx = open + 1
+            while (idx < masked.length && masked[idx].isWhitespace()) idx++
+            if (idx >= masked.length) return false
+            if (masked[idx] != '(') return keywordAt(masked, idx, "select")
+            if (hasTopLevelCommaInGroup(masked, open)) return false
+            open = idx
+        }
+    }
+
+    /**
+     * Does the group opened by the `(` at [openParenIdx] contain a comma at
+     * its own top level — i.e. one not nested inside a further paren pair?
+     * The scan stops at the `)` that closes this group.
+     */
+    private fun hasTopLevelCommaInGroup(masked: String, openParenIdx: Int): Boolean {
+        var depth = 0
+        var i = openParenIdx + 1
+        while (i < masked.length) {
+            when (masked[i]) {
+                '(' -> depth++
+                ')' -> {
+                    if (depth == 0) return false
+                    depth--
+                }
+                ',' -> if (depth == 0) return true
             }
-            if (!keywordAt(masked, idx, "select")) return true
+            i++
         }
         return false
     }
