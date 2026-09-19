@@ -3,6 +3,7 @@ package com.anuj.notificationfirewall.domain.wall
 import android.util.Log
 import com.anuj.notificationfirewall.data.prefs.WallSettings
 import com.anuj.notificationfirewall.domain.model.IncomingNotification
+import kotlinx.coroutines.CancellationException
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
@@ -63,22 +64,33 @@ class WallPipeline(
             return decided(cached, WallDecisionSource.CACHE, appliedBias, shape)
         }
 
+        val state = JevState(
+            app = n.appLabel,
+            channel = channelId,
+            title = n.title,
+            text = n.text,
+            arrivedAtLocal = n.postedAt.atZone(zone).format(HOUR_MINUTE),
+            isReplyCapable = isReplyCapable,
+            isFromContact = n.isFavoriteContact,
+        )
+
         val verdict = try {
-            jev.classify(
-                JevState(
-                    app = n.appLabel,
-                    channel = channelId,
-                    title = n.title,
-                    text = n.text,
-                    arrivedAtLocal = n.postedAt.atZone(zone).format(HOUR_MINUTE),
-                    isReplyCapable = isReplyCapable,
-                    isFromContact = n.isFavoriteContact,
-                ),
-            )
-        } catch (e: JevException) {
-            // Offline, throttled, down, or malformed. Nothing is lost: the
-            // notification is stored and flagged, and the re-classification
-            // worker picks it up when the network returns.
+            jev.classify(state)
+        } catch (e: CancellationException) {
+            // Structured concurrency: a cancelled coroutine must keep propagating
+            // cancellation, never be reinterpreted as a Jev failure. Do not fold
+            // this into the clause below.
+            throw e
+        } catch (e: Exception) {
+            // Any other failure of the classify call — offline, throttled, down,
+            // malformed, or anything else a JevApi implementation can throw —
+            // degrades to silence-and-store. Nothing is lost: the notification
+            // is stored and flagged, and the re-classification worker picks it
+            // up when the network returns. This guarantee is structural to the
+            // JevApi type, not tied to JevException: the try wraps only the
+            // jev.classify(state) call, with `state` built beforehand, so this
+            // clause is the single, unconditional gate on the only network hop
+            // in the pipeline.
             Log.w(TAG, "Jev unavailable for ${n.packageName}; silencing pending re-classification", e)
             return WallDecision(
                 bucket = WallBucket.SILENCE,
