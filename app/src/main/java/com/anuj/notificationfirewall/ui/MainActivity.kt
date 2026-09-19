@@ -46,6 +46,7 @@ import javax.inject.Inject
 /** Nav routes. Screens that take an id append it as a path arg. */
 object Routes {
     const val WELCOME = "welcome"
+    const val ASSESSMENT = "assessment"
     const val HOME = "home"
     const val ONBOARDING = "onboarding"
     const val INBOX = "inbox"
@@ -140,6 +141,7 @@ private fun NfApp(
 private fun NfNavGraph(nav: NavHostController, startDestination: String) {
     NavHost(navController = nav, startDestination = startDestination) {
         composable(Routes.WELCOME) { WelcomeScreen(nav) }
+        composable(Routes.ASSESSMENT) { com.anuj.notificationfirewall.ui.assessment.AssessmentScreen(nav) }
         composable(Routes.HOME) { HomeScreen(nav) }
         composable(Routes.ONBOARDING) { OnboardingScreen(nav) }
         composable(Routes.INBOX) { InboxScreen(nav) }

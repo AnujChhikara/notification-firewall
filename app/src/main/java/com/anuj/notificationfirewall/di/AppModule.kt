@@ -11,6 +11,7 @@ import com.anuj.notificationfirewall.ai.OpenAiClient
 import com.anuj.notificationfirewall.ai.OpenAiDigestService
 import com.anuj.notificationfirewall.ai.OpenAiImportanceService
 import com.anuj.notificationfirewall.data.db.NfDatabase
+import com.anuj.notificationfirewall.data.db.dao.AssessmentDao
 import com.anuj.notificationfirewall.data.db.dao.NotificationDao
 import com.anuj.notificationfirewall.data.db.dao.ProfileDao
 import com.anuj.notificationfirewall.data.db.dao.RuleDao
@@ -72,6 +73,9 @@ object AppModule {
 
     @Provides
     fun provideNotificationDao(db: NfDatabase): NotificationDao = db.notificationDao()
+
+    @Provides
+    fun provideAssessmentDao(db: NfDatabase): AssessmentDao = db.assessmentDao()
 
     @Provides
     @Singleton

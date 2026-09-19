@@ -88,7 +88,7 @@ fun WelcomeScreen(nav: NavHostController, vm: WelcomeViewModel = hiltViewModel()
 
     fun finish() {
         vm.markSeen()
-        nav.navigate(Routes.ONBOARDING) {
+        nav.navigate(Routes.ASSESSMENT) {
             popUpTo(Routes.WELCOME) { inclusive = true }
         }
     }
