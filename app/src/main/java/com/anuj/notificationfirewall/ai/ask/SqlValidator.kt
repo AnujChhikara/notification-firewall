@@ -22,11 +22,19 @@ sealed interface SqlVerdict {
  * The content-leak guard is not a bare `contains("*")`: that would also reject
  * `COUNT(*)`, which is a legitimate aggregate. Instead it specifically rejects
  * a bare or qualified star *projection* (`SELECT *`, `SELECT  *`, `SELECT\n*`,
- * `SELECT n.*`, including one among several projected columns) and rejects
- * whole-word references to the `title`/`text` columns anywhere in the
- * statement — while leaving `COUNT(*)`, `COUNT( * )`, and identifiers that
- * merely contain "title" or "text" as a substring (e.g. `titles`, or a string
- * literal like `'com.title.app'`) untouched.
+ * `SELECT n.*`, `SELECT *FROM` with no separating space, including one among
+ * several projected columns) and rejects whole-word references to the
+ * `title`/`text` columns anywhere in the statement — while leaving
+ * `COUNT(*)`, `COUNT( * )`, and identifiers that merely contain "title" or
+ * "text" as a substring (e.g. `titles`, or a string literal like
+ * `'com.title.app'`) untouched.
+ *
+ * Double quotes, backticks and square brackets are rejected outright rather
+ * than masked like single-quoted literals: SQLite accepts any of them as
+ * identifier quoting, and an identifier can contain almost anything —
+ * including a `(` or `,` that would otherwise defeat the paren-depth and
+ * comma-join checks below. Nothing this feature's schema needs requires
+ * quoting an identifier, so the whole class is refused up front.
  */
 object SqlValidator {
 
@@ -40,12 +48,28 @@ object SqlValidator {
         "pragma", "attach", "detach", "vacuum", "reindex", "trigger",
         "sqlite_master", "sqlite_temp_master", "load_extension",
     )
+    private val FORBIDDEN_PATTERNS = FORBIDDEN.map { it to Regex("""\b${Regex.escape(it)}\b""") }
 
+    private val QUOTE_CHARS = charArrayOf('"', '`', '[', ']')
+
+    private val SELECT_START = Regex("""^select\b""", RegexOption.IGNORE_CASE)
     private val FROM_OR_JOIN = Regex("""\b(?:from|join)\s+([a-z_][a-z0-9_]*)""", RegexOption.IGNORE_CASE)
     private val FROM_KEYWORD = Regex("""\bfrom\b""", RegexOption.IGNORE_CASE)
     private val CLAUSE_STOP_WORDS = setOf("where", "group", "order", "limit")
-    private val LIMIT = Regex("""\blimit\s+(\d+)""", RegexOption.IGNORE_CASE)
     private val FENCE = Regex("""^```(?:sql)?\s*|\s*```$""", RegexOption.IGNORE_CASE)
+
+    // Exactly one LIMIT is tolerated, and it must be the final clause of the
+    // statement: `LIMIT <n>` optionally followed by `OFFSET <n>`. Anchoring to
+    // the end of the string rules out `LIMIT 1, 100000` (SQLite's
+    // offset,count form — the number that actually bounds the result set is
+    // the *second* one) and `LIMIT 5*1000` (an expression, not a bare
+    // integer), both of which a non-anchored "first digits after limit"
+    // capture would misread as the small, safe-looking number.
+    private val LIMIT_KEYWORD = Regex("""\blimit\b""", RegexOption.IGNORE_CASE)
+    private val LIMIT_CLAUSE = Regex(
+        """\blimit\s+(\d+)\s*(?:offset\s+\d+\s*)?$""",
+        setOf(RegexOption.IGNORE_CASE),
+    )
 
     // Quoted string literals can contain arbitrary text ('com.title.app') that
     // must not be mistaken for a keyword or column reference. Blank them out
@@ -71,7 +95,7 @@ object SqlValidator {
                 '(' -> depth++
                 ')' -> depth--
             }
-            if (depth <= 0) {
+            if (depth == 0) {
                 if (c == ',') return true
                 if (c.isLetter() && (i == 0 || !text[i - 1].isLetterOrDigit() && text[i - 1] != '_')) {
                     val word = CLAUSE_STOP_WORDS.firstOrNull { stop ->
@@ -86,10 +110,28 @@ object SqlValidator {
         return false
     }
 
+    private fun hasUnbalancedParens(text: String): Boolean {
+        var depth = 0
+        for (c in text) {
+            when (c) {
+                '(' -> depth++
+                ')' -> {
+                    depth--
+                    if (depth < 0) return true
+                }
+            }
+        }
+        return depth != 0
+    }
+
     // The projection is everything between the leading SELECT and the first
     // top-level FROM. A star there — bare or qualified (`t.*`), alone or
-    // alongside other columns — would expand to include title/text.
-    private val PROJECTION = Regex("""^select\s+(.*?)\s+from\b""", RegexOption.DOT_MATCHES_ALL)
+    // alongside other columns — would expand to include title/text. The
+    // boundary is `\b`, not `\s+`: `SELECT *FROM notifications` has no space
+    // between the star and FROM, and a whitespace-requiring boundary would
+    // fail to match at all, silently falling back to an empty projection and
+    // letting the star through unchecked.
+    private val PROJECTION = Regex("""^select\b(.*?)\bfrom\b""", RegexOption.DOT_MATCHES_ALL)
     private val STAR_PROJECTION = Regex("""(?:^|,)\s*(?:[a-z_][a-z0-9_]*\.)?\*\s*(?:,|$)""")
 
     fun validate(raw: String, allowContent: Boolean): SqlVerdict {
@@ -105,15 +147,22 @@ object SqlValidator {
         if (sql.contains(";")) {
             return SqlVerdict.Rejected("Only a single statement is permitted")
         }
+        if (sql.any { it in QUOTE_CHARS }) {
+            return SqlVerdict.Rejected("Quoted or bracketed identifiers (\", `, [, ]) are not permitted")
+        }
 
         val lower = sql.lowercase()
         val masked = maskLiterals(lower)
 
-        if (!lower.startsWith("select ")) {
+        if (hasUnbalancedParens(masked)) {
+            return SqlVerdict.Rejected("Unbalanced parentheses")
+        }
+
+        if (!SELECT_START.containsMatchIn(lower)) {
             return SqlVerdict.Rejected("Only SELECT statements are permitted")
         }
-        FORBIDDEN.firstOrNull { Regex("""\b${Regex.escape(it)}\b""").containsMatchIn(masked) }
-            ?.let { return SqlVerdict.Rejected("Forbidden keyword: $it") }
+        FORBIDDEN_PATTERNS.firstOrNull { (_, pattern) -> pattern.containsMatchIn(masked) }
+            ?.let { (word, _) -> return SqlVerdict.Rejected("Forbidden keyword: $word") }
 
         if (hasTopLevelCommaInFromClause(masked)) {
             return SqlVerdict.Rejected("Comma joins are not supported; use JOIN")
@@ -125,7 +174,9 @@ object SqlValidator {
             ?.let { return SqlVerdict.Rejected("Unknown table: $it") }
 
         if (!allowContent) {
-            val projection = PROJECTION.find(masked)?.groupValues?.get(1).orEmpty()
+            val projectionMatch = PROJECTION.find(masked)
+                ?: return SqlVerdict.Rejected("Could not determine the SELECT projection")
+            val projection = projectionMatch.groupValues[1]
             if (STAR_PROJECTION.containsMatchIn(projection)) {
                 return SqlVerdict.Rejected("SELECT * would expose notification content")
             }
@@ -133,7 +184,12 @@ object SqlValidator {
                 ?.let { return SqlVerdict.Rejected("Column '$it' holds notification content") }
         }
 
-        val limit = LIMIT.find(lower)?.groupValues?.get(1)?.toIntOrNull()
+        if (LIMIT_KEYWORD.findAll(masked).count() != 1) {
+            return SqlVerdict.Rejected("Exactly one LIMIT clause is required")
+        }
+        val limitMatch = LIMIT_CLAUSE.find(masked)
+            ?: return SqlVerdict.Rejected("LIMIT must be the final clause, as LIMIT <n> optionally followed by OFFSET <n>")
+        val limit = limitMatch.groupValues[1].toIntOrNull()
             ?: return SqlVerdict.Rejected("A LIMIT is required")
         if (limit > MAX_LIMIT) return SqlVerdict.Rejected("LIMIT must be at most $MAX_LIMIT")
 
