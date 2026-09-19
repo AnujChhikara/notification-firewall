@@ -48,6 +48,18 @@ interface NotificationDao {
     @Query("UPDATE notifications SET isRead = 1 WHERE id = :id")
     suspend fun markRead(id: Long)
 
+    /**
+     * Clears the pending flag without writing a verdict — for records whose
+     * text was already purged by retention. There is nothing left to send to
+     * Jev, so no classification is possible; recording that honestly (verdict
+     * columns left NULL) is correct, not writing fabricated numbers just to
+     * satisfy [applyVerdict]'s non-nullable signature. SQL aggregates skip
+     * NULLs, so stats and Ask stay accurate instead of averaging in a fake
+     * verdict.
+     */
+    @Query("UPDATE notifications SET pendingClassification = 0 WHERE id = :id")
+    suspend fun clearPending(id: Long)
+
     @Query(
         "UPDATE notifications SET title = NULL, text = NULL, textPurgedAt = :nowMs " +
             "WHERE timestampEpochMs < :cutoffMs AND textPurgedAt IS NULL",

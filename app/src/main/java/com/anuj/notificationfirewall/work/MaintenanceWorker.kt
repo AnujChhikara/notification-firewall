@@ -18,14 +18,22 @@ import dagger.assisted.AssistedInject
 private const val TAG = "MaintenanceWorker"
 
 /**
- * Periodic safety net (every day, scheduled by [WallWorkScheduler]): stops the
- * keep-alive service if the wall is no longer armed, runs the health check,
- * purges notification text past the retention window, and evicts stale cache
- * entries. Runs in the background so it can't START the keep-alive service —
- * Android forbids starting a foreground service from most background
- * contexts — but stopping one is allowed from anywhere, so this is a safety
- * net against a stale keep-alive outliving a disarm that happened while the
- * app wasn't around to react to it.
+ * Periodic safety net, scheduled every 15 minutes by [WallWorkScheduler] —
+ * WorkManager's minimum periodic interval. That cadence is set by
+ * [healthMonitor]'s heartbeat, which detects a killed or unbound
+ * `NotificationListenerService`: stretching this interval would silently
+ * stretch listener-death detection right along with it, up to 24 hours if
+ * this ran only daily. Do not lengthen this interval for the retention
+ * purge's sake — that work only rides along here because it is cheap and
+ * idempotent, not because it needs its own cadence.
+ *
+ * Each run: stops the keep-alive service if the wall is no longer armed,
+ * runs the health check, purges notification text past the retention
+ * window, and evicts stale cache entries. Runs in the background so it can't
+ * START the keep-alive service — Android forbids starting a foreground
+ * service from most background contexts — but stopping one is allowed from
+ * anywhere, so this is a safety net against a stale keep-alive outliving a
+ * disarm that happened while the app wasn't around to react to it.
  */
 @HiltWorker
 class MaintenanceWorker @AssistedInject constructor(

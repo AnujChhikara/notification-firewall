@@ -137,4 +137,27 @@ class RetentionTest {
 
         assertEquals(0, db.notificationDao().pending(limit = 50).size)
     }
+
+    @Test
+    fun clearPendingLeavesVerdictColumnsNullForRecordsWithPurgedText() = runTest {
+        val id = db.notificationDao().insert(
+            NotificationRecordEntity(
+                packageName = "com.x", appLabel = "X", title = null, text = null,
+                timestampEpochMs = NOW, senderKey = "S", contentShape = "shape",
+                importanceScore = null, biasApplied = 0f, category = null,
+                isTimeSensitive = null, isFromHuman = null, needsAction = null,
+                jevConfidence = null, decisionSource = WallDecisionSource.PENDING,
+                bucket = WallBucket.SILENCE, pendingClassification = true,
+                textPurgedAt = NOW - DAY_MS, isRead = false,
+            ),
+        )
+
+        db.notificationDao().clearPending(id)
+
+        val record = db.notificationDao().recordsBetween(0, Long.MAX_VALUE).single { it.id == id }
+        assertEquals("pending flag must be cleared", false, record.pendingClassification)
+        assertNull("no verdict was ever computed; importance must stay NULL", record.importanceScore)
+        assertNull("no verdict was ever computed; category must stay NULL", record.category)
+        assertNull("no verdict was ever computed; confidence must stay NULL", record.jevConfidence)
+    }
 }

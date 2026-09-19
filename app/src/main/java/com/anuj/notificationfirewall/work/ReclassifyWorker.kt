@@ -9,7 +9,6 @@ import com.anuj.notificationfirewall.data.db.dao.NotificationDao
 import com.anuj.notificationfirewall.data.prefs.WallSettings
 import com.anuj.notificationfirewall.domain.wall.JevApi
 import com.anuj.notificationfirewall.domain.wall.JevState
-import com.anuj.notificationfirewall.domain.wall.NotificationCategory
 import com.anuj.notificationfirewall.domain.wall.VerdictCache
 import com.anuj.notificationfirewall.domain.wall.WallBucket
 import com.anuj.notificationfirewall.domain.wall.WallDecisionSource
@@ -48,23 +47,19 @@ class ReclassifyWorker @AssistedInject constructor(
 
         var failures = 0
         for (record in pending) {
-            // Text may already have been purged by the retention job; without
-            // content there is nothing to classify, so clear the flag and move
-            // on rather than retrying forever.
+            // Text may already have been purged by the retention job. With no
+            // title or text there is nothing to send to Jev, so no
+            // classification is possible — clear the pending flag and record
+            // that honestly by leaving the verdict columns NULL, rather than
+            // writing fabricated numbers (e.g. importance = 1f) just to
+            // satisfy applyVerdict's non-nullable signature. A record with no
+            // verdict must not look like it has one: stats and Ask trust
+            // these columns, and SQL aggregates skip NULLs correctly, so this
+            // keeps them accurate instead of quietly averaging in fake data.
             val title = record.title
             val text = record.text
             if (title == null && text == null) {
-                notificationDao.applyVerdict(
-                    id = record.id,
-                    importance = 1f,
-                    category = NotificationCategory.OTHER,
-                    timeSensitive = 0f,
-                    fromHuman = 0f,
-                    needsAction = 0f,
-                    confidence = 0f,
-                    bucket = record.bucket,
-                    source = WallDecisionSource.LEGACY,
-                )
+                notificationDao.clearPending(record.id)
                 continue
             }
 
