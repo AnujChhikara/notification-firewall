@@ -587,4 +587,140 @@ class SqlValidatorTest {
             allowed("SELECT packageName, appLabel, COUNT(*) FROM notifications GROUP BY packageName, appLabel LIMIT 10"),
         )
     }
+
+    // ── Round-3 review: compound statements (Critical A, still open) ──────────
+    // `findTopLevelProjection` only ever inspects the FIRST branch of a
+    // compound SELECT. A star in a later UNION/UNION ALL/INTERSECT/EXCEPT
+    // branch was never checked at all -- confirmed against real SQLite to
+    // return `title`/`text`. Rather than teach the parser about multiple
+    // projections, the whole class is rejected outright.
+
+    @Test
+    fun unionAllWithALeakingStarInTheSecondBranchIsRejected() {
+        // The exact reviewer PoC: 20 literals match the arity of
+        // `notifications`, so the UNION ALL is structurally valid, and the
+        // real leak is the `*` in the second branch.
+        rejectedBecause(
+            "SELECT 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20 FROM notifications " +
+                "UNION ALL SELECT * FROM notifications LIMIT 5",
+            "Compound statements",
+            content = false,
+        )
+    }
+
+    @Test
+    fun unionWithoutAllIsRejected() {
+        rejectedBecause(
+            "SELECT packageName FROM notifications UNION SELECT packageName FROM overrides LIMIT 5",
+            "Compound statements",
+        )
+    }
+
+    @Test
+    fun intersectIsRejected() {
+        rejectedBecause(
+            "SELECT packageName FROM notifications INTERSECT SELECT packageName FROM overrides LIMIT 5",
+            "Compound statements",
+        )
+    }
+
+    @Test
+    fun exceptIsRejected() {
+        rejectedBecause(
+            "SELECT packageName FROM notifications EXCEPT SELECT packageName FROM overrides LIMIT 5",
+            "Compound statements",
+        )
+    }
+
+    @Test
+    fun unionAllWithNoLeftHandFromAtAllIsStillRejected() {
+        // The left-hand branch doesn't even need a FROM for the compound
+        // form to be dangerous -- the leak is entirely in the right branch.
+        rejectedBecause(
+            "SELECT 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20 " +
+                "UNION ALL SELECT * FROM notifications LIMIT 5",
+            "Compound statements",
+            content = false,
+        )
+    }
+
+    // ── Round-3 review: parenthesised join clauses (Critical B, still open) ───
+    // SQLite's grammar has `table-or-subquery := ( join-clause )`, and `,` is
+    // itself a join operator, so `JOIN (a, b)` names a second table that
+    // neither the comma-join scan (which only looks inside a FROM keyword's
+    // own clause) nor FROM_OR_JOIN (which requires a bare identifier right
+    // after from/join, not a paren) ever sees. Confirmed against real SQLite
+    // to return data from the unvetted table. Fix: a `(` directly after
+    // from/join is only permitted when a `select` follows it.
+
+    @Test
+    fun parenthesisedJoinClauseWithAnUnvettedTableIsRejected() {
+        rejectedBecause(
+            "SELECT locale FROM notifications JOIN (notifications, android_metadata) LIMIT 5",
+            "parenthesised join clause",
+        )
+    }
+
+    @Test
+    fun parenthesisedJoinClauseReachingSqliteSchemaIsRejected() {
+        // This exact reviewer PoC is caught earlier, by the new
+        // sqlite_schema forbidden-keyword entry -- verifying both defenses.
+        rejectedBecause(
+            "SELECT sql FROM notifications JOIN (notifications, sqlite_schema) LIMIT 5",
+            "sqlite_schema",
+        )
+    }
+
+    @Test
+    fun sqliteSchemaAloneIsRejectedAsAForbiddenKeyword() {
+        rejectedBecause("SELECT name FROM sqlite_schema LIMIT 5", "Forbidden keyword: sqlite_schema")
+    }
+
+    @Test
+    fun aliasedParenthesisedJoinClauseIsRejected() {
+        rejectedBecause(
+            "SELECT locale FROM notifications JOIN (notifications, android_metadata) x LIMIT 5",
+            "parenthesised join clause",
+        )
+    }
+
+    @Test
+    fun doublyParenthesisedJoinClauseIsRejected() {
+        rejectedBecause(
+            "SELECT locale FROM notifications JOIN ((notifications, android_metadata)) LIMIT 5",
+            "parenthesised join clause",
+        )
+    }
+
+    @Test
+    fun parenthesisedJoinClauseDirectlyAfterFromIsRejected() {
+        rejectedBecause(
+            "SELECT locale FROM (notifications, android_metadata) LIMIT 5",
+            "parenthesised join clause",
+        )
+    }
+
+    @Test
+    fun ordinarySubqueryAfterFromIsStillAllowed() {
+        assertTrue(allowed("SELECT c FROM (SELECT COUNT(*) AS c FROM notifications) LIMIT 5"))
+    }
+
+    @Test
+    fun doublyWrappedSubqueryAfterFromIsStillAllowed() {
+        // Sibling: the doubly-parenthesised *legitimate* form -- a subquery
+        // wrapped in redundant extra parens -- must not be caught by the fix
+        // for the doubly-parenthesised *attack* form above.
+        assertTrue(allowed("SELECT c FROM ((SELECT COUNT(*) AS c FROM notifications)) LIMIT 5"))
+    }
+
+    @Test
+    fun aliasedSubqueryAfterJoinIsStillAllowed() {
+        assertTrue(
+            allowed(
+                "SELECT n.appLabel, b.bias FROM notifications n " +
+                    "JOIN (SELECT packageName, bias FROM sender_bias) b ON b.packageName = n.packageName LIMIT 5",
+            ),
+        )
+    }
+
 }

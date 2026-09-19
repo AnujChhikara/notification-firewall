@@ -56,16 +56,24 @@ object SqlValidator {
     private val FORBIDDEN = listOf(
         "insert", "update", "delete", "drop", "alter", "create", "replace",
         "pragma", "attach", "detach", "vacuum", "reindex", "trigger",
-        "sqlite_master", "sqlite_temp_master", "load_extension",
+        "sqlite_master", "sqlite_temp_master", "sqlite_schema", "load_extension",
     )
     private val FORBIDDEN_PATTERNS = FORBIDDEN.map { it to Regex("""\b${Regex.escape(it)}\b""") }
+
+    // A compound SELECT (UNION[ALL]/INTERSECT/EXCEPT) has more than one
+    // projection, and this validator only ever inspects the first branch's
+    // projection for a leaking star -- the Ask tab has no need to emit one,
+    // so the whole class is refused rather than taught to the parser.
+    private val COMPOUND_KEYWORDS = listOf("union", "intersect", "except")
+    private val COMPOUND_PATTERNS = COMPOUND_KEYWORDS.map { it to Regex("""\b${Regex.escape(it)}\b""") }
 
     private val QUOTE_CHARS = charArrayOf('"', '`', '[', ']')
 
     private val SELECT_START = Regex("""^select\b""", RegexOption.IGNORE_CASE)
     private val FROM_OR_JOIN = Regex("""\b(?:from|join)\s+([a-z_][a-z0-9_]*)""", RegexOption.IGNORE_CASE)
+    private val FROM_OR_JOIN_PAREN = Regex("""\b(?:from|join)\s*\(""", RegexOption.IGNORE_CASE)
     private val FROM_KEYWORD = Regex("""\bfrom\b""", RegexOption.IGNORE_CASE)
-    private val CLAUSE_STOP_WORDS = setOf("where", "group", "order", "limit")
+    private val CLAUSE_STOP_WORDS = setOf("where", "group", "having", "order", "limit")
     private val FENCE = Regex("""^```(?:sql)?\s*|\s*```$""", RegexOption.IGNORE_CASE)
 
     // Exactly one LIMIT is tolerated, and it must be the final clause of the
@@ -217,6 +225,31 @@ object SqlValidator {
         return false
     }
 
+    /**
+     * SQLite's grammar allows `table-or-subquery := ( join-clause )`, and `,`
+     * is itself a join operator — so `JOIN (notifications, android_metadata)`
+     * is a parenthesised join clause naming a second, entirely unvetted
+     * table, and neither the comma-join scan above (which only looks inside
+     * a `FROM` keyword's own clause) nor [FROM_OR_JOIN] (which requires a
+     * bare identifier immediately after `from`/`join`, not a `(`) ever sees
+     * it. Rather than teach either of those checks about this grammar rule,
+     * a `(` directly following `from`/`join` is only ever permitted when the
+     * first keyword inside it — after skipping whitespace and any further
+     * immediately-nested `(` (the doubly-parenthesised form) — is `select`,
+     * i.e. an ordinary subquery. Anything else (a bare table list, an alias,
+     * another join clause) is rejected outright.
+     */
+    private fun hasNonSubqueryParenAfterFromOrJoin(masked: String): Boolean {
+        for (match in FROM_OR_JOIN_PAREN.findAll(masked)) {
+            var idx = match.range.last + 1 // just past the '(' this match ended on
+            while (idx < masked.length && (masked[idx].isWhitespace() || masked[idx] == '(')) {
+                idx++
+            }
+            if (!keywordAt(masked, idx, "select")) return true
+        }
+        return false
+    }
+
     fun validate(raw: String, allowContent: Boolean): SqlVerdict {
         val sql = raw.trim().replace(FENCE, "").trim().removeSuffix(";").trim()
 
@@ -247,8 +280,17 @@ object SqlValidator {
         FORBIDDEN_PATTERNS.firstOrNull { (_, pattern) -> pattern.containsMatchIn(masked) }
             ?.let { (word, _) -> return SqlVerdict.Rejected("Forbidden keyword: $word") }
 
+        COMPOUND_PATTERNS.firstOrNull { (_, pattern) -> pattern.containsMatchIn(masked) }
+            ?.let { (word, _) ->
+                return SqlVerdict.Rejected("Compound statements ($word) are not supported; only a single SELECT is permitted")
+            }
+
         if (hasCommaInAnyFromClause(masked)) {
             return SqlVerdict.Rejected("Comma joins are not supported; use JOIN")
+        }
+
+        if (hasNonSubqueryParenAfterFromOrJoin(masked)) {
+            return SqlVerdict.Rejected("A parenthesised join clause is not supported; only a subquery is permitted after FROM/JOIN")
         }
 
         val tables = FROM_OR_JOIN.findAll(masked).map { it.groupValues[1] }.toSet()
