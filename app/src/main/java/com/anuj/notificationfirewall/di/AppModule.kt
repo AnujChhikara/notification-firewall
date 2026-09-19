@@ -6,24 +6,19 @@ import androidx.room.Room
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.anuj.notificationfirewall.ai.DigestService
-import com.anuj.notificationfirewall.ai.ImportanceService
 import com.anuj.notificationfirewall.ai.OpenAiClient
 import com.anuj.notificationfirewall.ai.OpenAiDigestService
-import com.anuj.notificationfirewall.ai.OpenAiImportanceService
 import com.anuj.notificationfirewall.data.db.MIGRATION_3_4
 import com.anuj.notificationfirewall.data.db.MIGRATION_4_5
+import com.anuj.notificationfirewall.data.db.MIGRATION_5_6
 import com.anuj.notificationfirewall.data.db.NfDatabase
 import com.anuj.notificationfirewall.data.db.dao.NotificationDao
 import com.anuj.notificationfirewall.data.db.dao.OverrideDao
-import com.anuj.notificationfirewall.data.db.dao.ProfileDao
-import com.anuj.notificationfirewall.data.db.dao.RuleDao
 import com.anuj.notificationfirewall.data.db.dao.SenderBiasDao
 import com.anuj.notificationfirewall.data.db.dao.VerdictCacheDao
 import com.anuj.notificationfirewall.ai.jev.JevClient
 import com.anuj.notificationfirewall.data.prefs.SecurePrefs
 import com.anuj.notificationfirewall.data.prefs.WallSettings
-import com.anuj.notificationfirewall.domain.profile.ProfileManager
-import com.anuj.notificationfirewall.domain.rules.RuleEngine
 import com.anuj.notificationfirewall.domain.wall.BiasStore
 import com.anuj.notificationfirewall.domain.wall.JevApi
 import com.anuj.notificationfirewall.domain.wall.OverrideStore
@@ -31,7 +26,6 @@ import com.anuj.notificationfirewall.domain.wall.VerdictCache
 import com.anuj.notificationfirewall.domain.wall.WallPipeline
 import com.anuj.notificationfirewall.service.BucketExecutor
 import com.anuj.notificationfirewall.service.ChannelManager
-import com.anuj.notificationfirewall.service.NotificationPipeline
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -74,14 +68,8 @@ object AppModule {
     @Singleton
     fun provideNfDatabase(@ApplicationContext context: Context): NfDatabase =
         Room.databaseBuilder(context, NfDatabase::class.java, DATABASE_NAME)
-            .addMigrations(MIGRATION_3_4, MIGRATION_4_5)
+            .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
             .build()
-
-    @Provides
-    fun provideProfileDao(db: NfDatabase): ProfileDao = db.profileDao()
-
-    @Provides
-    fun provideRuleDao(db: NfDatabase): RuleDao = db.ruleDao()
 
     @Provides
     fun provideNotificationDao(db: NfDatabase): NotificationDao = db.notificationDao()
@@ -115,29 +103,8 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideImportanceService(client: OpenAiClient): ImportanceService =
-        OpenAiImportanceService(client)
-
-    @Provides
-    @Singleton
     fun provideDigestService(client: OpenAiClient): DigestService =
         OpenAiDigestService(client)
-
-    @Provides
-    @Singleton
-    fun provideRuleEngine(): RuleEngine = RuleEngine()
-
-    @Provides
-    @Singleton
-    fun provideProfileManager(): ProfileManager = ProfileManager()
-
-    @Provides
-    @Singleton
-    fun provideNotificationPipeline(
-        profileManager: ProfileManager,
-        ruleEngine: RuleEngine,
-        importanceService: ImportanceService
-    ): NotificationPipeline = NotificationPipeline(profileManager, ruleEngine, importanceService)
 
     @Provides
     @Singleton

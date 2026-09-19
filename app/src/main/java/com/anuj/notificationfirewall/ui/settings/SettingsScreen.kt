@@ -73,7 +73,6 @@ fun SettingsScreen(nav: NavHostController, vm: SettingsViewModel = hiltViewModel
             SectionLabel("Firewall")
             NfCard {
                 Column(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
-                    NfRow("Profiles & rules", subtitle = "Schedules, buckets, auto-DND") { nav.navigate(Routes.PROFILES) }
                     NfRow("Wake-up digest", subtitle = "What you missed while away") { nav.navigate(Routes.DIGEST) }
                     NfRow("Permissions", subtitle = "Access & reliability grants") { nav.navigate(Routes.ONBOARDING) }
                 }

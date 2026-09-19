@@ -64,25 +64,19 @@
             </intent-filter>
         </service>
 
-        <!-- Keep-alive foreground service, run only while a profile window is
-             active. specialUse: our need (pinning the notification listener
-             during scheduled windows) doesn't fit a standard FGS type. -->
+        <!-- Keep-alive foreground service, run only while the wall is armed.
+             specialUse: our need (pinning the notification listener while
+             armed) doesn't fit a standard FGS type. -->
         <service
             android:name=".service.KeepAliveService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Keeps the notification firewall filtering during scheduled profile windows" />
+                android:value="Keeps the notification firewall filtering while the wall is armed" />
         </service>
 
-        <!-- Fired by an exact alarm at each profile-window boundary. Not exported:
-             it is triggered only by our own PendingIntent. -->
-        <receiver
-            android:name=".service.ProfileBoundaryReceiver"
-            android:exported="false" />
-
-        <!-- Re-arms the schedule after a reboot. Only listens to the protected
+        <!-- Re-asserts armed state after a reboot. Only listens to the protected
              BOOT_COMPLETED broadcast. -->
         <receiver
             android:name=".service.BootReceiver"

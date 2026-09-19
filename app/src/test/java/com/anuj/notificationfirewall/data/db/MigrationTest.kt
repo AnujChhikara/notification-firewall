@@ -219,4 +219,37 @@ class MigrationTest {
 
         db.close()
     }
+
+    @Test
+    fun migrate5To6_leavesWallTablesIntact() {
+        val db = openInMemoryDb()
+        createV4Schema(db)
+        MIGRATION_4_5.migrate(db)
+
+        db.execSQL(
+            """
+            INSERT INTO verdict_cache
+              (contentShape, packageName, senderKey, importance, category,
+               isTimeSensitive, isFromHuman, needsAction, confidence,
+               hitCount, createdAtEpochMs, lastUsedEpochMs)
+            VALUES ('s1', 'com.myntra', 'Myntra', 1.4, 'PROMOTION',
+                    0.1, 0.03, 0.05, 0.9, 3, 1700000000000, 1700000000000)
+            """.trimIndent(),
+        )
+
+        MIGRATION_5_6.migrate(db)
+
+        fun tableExists(name: String): Boolean =
+            db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='$name'")
+                .use { it.count > 0 }
+
+        db.query("SELECT COUNT(*) FROM verdict_cache").use { c ->
+            c.moveToFirst()
+            assertEquals(1, c.getInt(0))
+        }
+        assertFalse(tableExists("profiles"))
+        assertFalse(tableExists("rules"))
+
+        db.close()
+    }
 }

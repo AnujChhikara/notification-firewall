@@ -6,9 +6,7 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
-import com.anuj.notificationfirewall.domain.profile.ActiveProfile
 import dagger.hilt.android.qualifiers.ApplicationContext
-import java.time.ZonedDateTime
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -18,8 +16,7 @@ private const val MINUTES_PER_DAY = 24 * 60
 /**
  * Pure: milliseconds from [nowMinuteOfDay] until the next occurrence of
  * [endMinuteOfDay]. When the end minute is now or already past today, it wraps
- * to tomorrow (a full day out when they are equal), never returning 0 — a
- * profile that just ended should digest at its *next* end, not instantly.
+ * to tomorrow (a full day out when they are equal), never returning 0.
  */
 fun delayUntilNextMillis(nowMinuteOfDay: Int, endMinuteOfDay: Int): Long {
     var deltaMinutes = endMinuteOfDay - nowMinuteOfDay
@@ -28,39 +25,44 @@ fun delayUntilNextMillis(nowMinuteOfDay: Int, endMinuteOfDay: Int): Long {
 }
 
 /**
- * Schedules the wake-up [DigestWorker] to run at a profile's end-of-window. Uses
- * unique work keyed on the profile id with REPLACE, so re-enabling or editing a
- * profile simply reschedules rather than stacking duplicate digests.
+ * Schedules the wake-up [DigestWorker] to run over a given window, summarizing
+ * whatever the wall captured/silenced between [windowStartMs] and
+ * [windowEndMs]. Uses unique work keyed on [key] with REPLACE, so scheduling
+ * again for the same key simply reschedules rather than stacking duplicates.
+ *
+ * Decoupled from the profile/rule model (Task 11): this no longer knows what a
+ * "profile" is, only a labeled window and a delay. Nothing currently calls
+ * [schedule] — Task 12 (background workers) wires a real trigger back up now
+ * that the profile-window concept it used to hang off of is gone.
  */
 @Singleton
 class DigestScheduler @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
-    fun scheduleForProfile(profile: ActiveProfile, now: ZonedDateTime = ZonedDateTime.now()) {
-        if (!profile.enabled) {
-            cancelForProfile(profile.id)
-            return
-        }
-        val nowMinute = now.hour * 60 + now.minute
-        val delayMs = delayUntilNextMillis(nowMinute, profile.endMinute)
-
+    fun schedule(key: String, label: String, delayMs: Long, windowStartMs: Long, windowEndMs: Long) {
         val request = OneTimeWorkRequestBuilder<DigestWorker>()
             .setInitialDelay(delayMs, TimeUnit.MILLISECONDS)
-            .setInputData(workDataOf(DigestWorker.KEY_PROFILE_ID to profile.id))
+            .setInputData(
+                workDataOf(
+                    DigestWorker.KEY_LABEL to label,
+                    DigestWorker.KEY_WINDOW_START_MS to windowStartMs,
+                    DigestWorker.KEY_WINDOW_END_MS to windowEndMs,
+                ),
+            )
             .build()
 
         WorkManager.getInstance(context).enqueueUniqueWork(
-            uniqueName(profile.id),
+            uniqueName(key),
             ExistingWorkPolicy.REPLACE,
             request,
         )
     }
 
-    fun cancelForProfile(profileId: Long) {
-        WorkManager.getInstance(context).cancelUniqueWork(uniqueName(profileId))
+    fun cancel(key: String) {
+        WorkManager.getInstance(context).cancelUniqueWork(uniqueName(key))
     }
 
     companion object {
-        fun uniqueName(profileId: Long): String = "digest-profile-$profileId"
+        fun uniqueName(key: String): String = "digest-$key"
     }
 }

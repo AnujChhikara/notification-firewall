@@ -5,7 +5,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
-import com.anuj.notificationfirewall.work.ProfileScheduler
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -16,24 +15,24 @@ import javax.inject.Inject
 private const val TAG = "BootReceiver"
 
 /**
- * After a reboot: re-arm the profile-boundary alarm and, if a window is active
- * right now, start the keep-alive service + DND. WorkManager restores its own
- * periodic jobs. BOOT_COMPLETED is a blessed context for starting a foreground
- * service, so canStartForeground = true.
+ * After a reboot: recompute the wall's armed state from the live system DND
+ * filter — never read from storage, per [ArmingController] — so the reported
+ * state is correct immediately, then re-run the health check. WorkManager
+ * restores its own periodic jobs on its own.
  */
 @AndroidEntryPoint
 class BootReceiver : BroadcastReceiver() {
 
-    @Inject lateinit var reconciler: ProfileStateReconciler
-    @Inject lateinit var scheduler: ProfileScheduler
+    @Inject lateinit var armingController: ArmingController
+    @Inject lateinit var healthMonitor: HealthMonitor
 
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
         val pending = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
             try {
-                scheduler.rescheduleAll()
-                reconciler.reconcileFromDb(canStartForeground = true)
+                armingController.onSystemDndChanged()
+                healthMonitor.refresh()
             } catch (e: Exception) {
                 Log.e(TAG, "Boot reconcile failed", e)
             } finally {

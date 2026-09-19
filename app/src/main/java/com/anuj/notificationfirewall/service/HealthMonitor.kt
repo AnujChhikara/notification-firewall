@@ -12,7 +12,6 @@ import android.content.pm.PackageManager
 import android.service.notification.NotificationListenerService
 import androidx.core.content.ContextCompat
 import com.anuj.notificationfirewall.R
-import com.anuj.notificationfirewall.data.db.dao.ProfileDao
 import com.anuj.notificationfirewall.data.prefs.SecurePrefs
 import com.anuj.notificationfirewall.ui.MainActivity
 import com.anuj.notificationfirewall.ui.permissions.Permissions
@@ -31,7 +30,6 @@ private const val ALERT_ID = 99
 class HealthMonitor @Inject constructor(
     @ApplicationContext private val context: Context,
     private val securePrefs: SecurePrefs,
-    private val profileDao: ProfileDao,
 ) {
     suspend fun refresh(): HealthState {
         val accessOn = Permissions.notificationAccessGranted(context)
@@ -50,7 +48,11 @@ class HealthMonitor @Inject constructor(
             notificationAccess = accessOn,
             listenerConnected = connected,
             postNotifications = Permissions.postNotificationsGranted(context),
-            needsDndAccess = profileDao.enabledProfiles().any { it.autoDnd },
+            // DND is now the sole silencing mechanism (no more per-profile
+            // opt-in), so the firewall always needs policy access to do its
+            // job — unlike ArmingController.isArmed(), which is itself gated
+            // on that same access and would make this condition self-masking.
+            needsDndAccess = true,
             dndAccess = Permissions.dndAccessGranted(context),
             batteryExempt = Permissions.batteryExempt(context),
             exactAlarms = Permissions.exactAlarmsAllowed(context),

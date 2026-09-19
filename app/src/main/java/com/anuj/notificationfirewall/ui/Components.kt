@@ -31,15 +31,11 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.anuj.notificationfirewall.R
-import com.anuj.notificationfirewall.domain.model.BucketAction
 import com.anuj.notificationfirewall.ui.theme.NfAccent
 import com.anuj.notificationfirewall.ui.theme.NfAccentSoft
 import com.anuj.notificationfirewall.ui.theme.NfBackground
 import com.anuj.notificationfirewall.ui.theme.NfBorder
 import com.anuj.notificationfirewall.ui.theme.NfBorderSubtle
-import com.anuj.notificationfirewall.ui.theme.NfCaptured
-import com.anuj.notificationfirewall.ui.theme.NfRang
-import com.anuj.notificationfirewall.ui.theme.NfSilenced
 import com.anuj.notificationfirewall.ui.theme.NfSurface
 import com.anuj.notificationfirewall.ui.theme.NfSurfaceElevated
 import com.anuj.notificationfirewall.ui.theme.NfText
@@ -259,19 +255,4 @@ fun NfBottomBar(currentRoute: String?, onSelect: (String) -> Unit, modifier: Mod
             }
         }
     }
-}
-
-fun bucketColor(bucket: BucketAction): Color = when (bucket) {
-    BucketAction.LET_THROUGH_AS_IS, BucketAction.LET_THROUGH_CUSTOM_SOUND -> NfRang
-    BucketAction.SILENCE -> NfSilenced
-    BucketAction.CAPTURE -> NfCaptured
-    BucketAction.ASK_AI -> NfAccent
-}
-
-fun bucketLabel(bucket: BucketAction): String = when (bucket) {
-    BucketAction.LET_THROUGH_AS_IS -> "Let through"
-    BucketAction.LET_THROUGH_CUSTOM_SOUND -> "Rang through"
-    BucketAction.SILENCE -> "Silenced"
-    BucketAction.CAPTURE -> "Captured"
-    BucketAction.ASK_AI -> "Ask AI"
 }

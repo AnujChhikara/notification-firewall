@@ -23,15 +23,13 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.anuj.notificationfirewall.data.db.NotificationRecordEntity
-import com.anuj.notificationfirewall.data.db.ProfileEntity
 import com.anuj.notificationfirewall.data.db.dao.NotificationDao
-import com.anuj.notificationfirewall.data.db.dao.ProfileDao
-import com.anuj.notificationfirewall.data.mapper.toActiveProfile
 import com.anuj.notificationfirewall.data.prefs.SecurePrefs
-import com.anuj.notificationfirewall.domain.profile.ProfileManager
+import com.anuj.notificationfirewall.service.ArmingController
 import com.anuj.notificationfirewall.service.HealthEvaluator
 import com.anuj.notificationfirewall.service.HealthFlags
 import com.anuj.notificationfirewall.service.HealthLevel
+import com.anuj.notificationfirewall.service.WallState
 import com.anuj.notificationfirewall.ui.NfButton
 import com.anuj.notificationfirewall.ui.NfCard
 import com.anuj.notificationfirewall.ui.NfRow
@@ -54,49 +52,42 @@ import com.anuj.notificationfirewall.ui.theme.NfTextMuted
 import com.anuj.notificationfirewall.ui.theme.NfTitle
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
-import java.time.ZonedDateTime
 import javax.inject.Inject
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
-    profileDao: ProfileDao,
+    private val armingController: ArmingController,
     notificationDao: NotificationDao,
-    private val profileManager: ProfileManager,
     private val securePrefs: SecurePrefs,
 ) : ViewModel() {
 
-    val profiles = profileDao.observeProfiles()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val wallState = armingController.observeState()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), armingController.state())
 
     val recent = notificationDao.observeRecent(8)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val hasApiKey: Boolean get() = securePrefs.hasKey
     val listenerConnected: Boolean get() = securePrefs.listenerConnected
-
-    fun activeProfileName(all: List<ProfileEntity>): String? =
-        profileManager.activeProfile(
-            all.filter { it.enabled }.map { it.toActiveProfile() },
-            ZonedDateTime.now(),
-        )?.name
 }
 
 @Composable
 fun HomeScreen(nav: NavHostController, vm: HomeViewModel = hiltViewModel()) {
     val context = LocalContext.current
-    val profiles by vm.profiles.collectAsStateWithLifecycle()
+    val wallState by vm.wallState.collectAsStateWithLifecycle()
     val recent by vm.recent.collectAsStateWithLifecycle()
-    val status = remember(profiles) { Permissions.status(context, vm.hasApiKey) }
-    val activeName = remember(profiles) { vm.activeProfileName(profiles) }
-    val health = remember(profiles) {
+    val status = remember(wallState) { Permissions.status(context, vm.hasApiKey) }
+    val armed = wallState == WallState.ARMED
+    val health = remember(wallState) {
         HealthEvaluator.evaluate(
             HealthFlags(
                 notificationAccess = status.notificationAccess,
                 listenerConnected = vm.listenerConnected,
                 postNotifications = status.postNotifications,
-                needsDndAccess = profiles.any { it.autoDnd },
+                // DND is now the wall's sole silencing mechanism, so it's
+                // always needed rather than conditional on a profile's setup.
+                needsDndAccess = true,
                 dndAccess = status.dndAccess,
                 batteryExempt = status.batteryExempt,
                 exactAlarms = status.exactAlarms,
@@ -125,7 +116,7 @@ fun HomeScreen(nav: NavHostController, vm: HomeViewModel = hiltViewModel()) {
                             )
                         }
                         Text(
-                            activeName?.let { "Active profile · $it" } ?: "No profile active — everything passes through",
+                            if (armed) "Wall armed — silencing and capturing" else "Wall disarmed — everything passes through",
                             style = MaterialTheme.typography.bodyMedium,
                             color = NfTextMuted,
                         )

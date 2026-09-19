@@ -3,26 +3,38 @@ package com.anuj.notificationfirewall.service
 
 import android.app.Notification
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import android.app.Service
 import android.os.IBinder
+import androidx.core.content.ContextCompat
 import com.anuj.notificationfirewall.R
 import com.anuj.notificationfirewall.ui.MainActivity
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 /**
- * A minimal foreground service whose only job is to pin the process while a
- * profile window is active, so aggressive OEMs don't kill the notification
- * listener. Shows one quiet ongoing notification. Started/stopped by
- * [ProfileStateReconciler]; never runs when no profile is active.
+ * A minimal foreground service whose only job is to pin the process while the
+ * wall is armed, so aggressive OEMs don't kill the notification listener.
+ * Shows one quiet ongoing notification.
+ *
+ * Self-verifying rather than trusting its caller's intent: every start checks
+ * [ArmingController] itself and immediately stops if the wall is not armed, so
+ * a stale or racing start can never pin the process when it shouldn't.
  */
 @AndroidEntryPoint
 class KeepAliveService : Service() {
 
+    @Inject lateinit var armingController: ArmingController
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val profileName = intent?.getStringExtra(EXTRA_PROFILE_NAME)
+        if (!armingController.isArmed()) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         NfChannels.ensureStatus(this)
 
         val openApp = PendingIntent.getActivity(
@@ -32,7 +44,7 @@ class KeepAliveService : Service() {
         )
 
         val notification: Notification = Notification.Builder(this, NfChannels.STATUS)
-            .setContentTitle(profileName?.let { "$it active" } ?: "Firewall active")
+            .setContentTitle("Firewall active")
             .setContentText("Filtering notifications")
             .setSmallIcon(R.drawable.ic_status)
             .setContentIntent(openApp)
@@ -46,7 +58,17 @@ class KeepAliveService : Service() {
     }
 
     companion object {
-        const val EXTRA_PROFILE_NAME = "profile_name"
         private const val NOTIFICATION_ID = 7
+
+        /** Requests the service start; it self-checks arming and no-ops if disarmed. */
+        fun start(context: Context) {
+            runCatching {
+                ContextCompat.startForegroundService(context, Intent(context, KeepAliveService::class.java))
+            }
+        }
+
+        fun stop(context: Context) {
+            runCatching { context.stopService(Intent(context, KeepAliveService::class.java)) }
+        }
     }
 }

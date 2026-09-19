@@ -7,8 +7,6 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.anuj.notificationfirewall.data.db.dao.NotificationDao
 import com.anuj.notificationfirewall.data.db.dao.OverrideDao
-import com.anuj.notificationfirewall.data.db.dao.ProfileDao
-import com.anuj.notificationfirewall.data.db.dao.RuleDao
 import com.anuj.notificationfirewall.data.db.dao.SenderBiasDao
 import com.anuj.notificationfirewall.data.db.dao.VerdictCacheDao
 
@@ -134,22 +132,26 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
     }
 }
 
+/** Removes the last traces of the profile/rule model. Wall data is untouched. */
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("DROP TABLE IF EXISTS profiles")
+        db.execSQL("DROP TABLE IF EXISTS rules")
+    }
+}
+
 @Database(
     entities = [
-        ProfileEntity::class,
-        RuleEntity::class,
         NotificationRecordEntity::class,
         VerdictCacheEntity::class,
         SenderBiasEntity::class,
         OverrideEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
 abstract class NfDatabase : RoomDatabase() {
-    abstract fun profileDao(): ProfileDao
-    abstract fun ruleDao(): RuleDao
     abstract fun notificationDao(): NotificationDao
     abstract fun verdictCacheDao(): VerdictCacheDao
     abstract fun senderBiasDao(): SenderBiasDao
