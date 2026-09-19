@@ -39,7 +39,7 @@ class ProfileStateReconciler @Inject constructor(
         } else {
             stopKeepAlive()
         }
-        dndController.reconcile(active)
+        dndController.apply(active?.autoDnd == true)
     }
 
     suspend fun reconcileFromDb(canStartForeground: Boolean) {

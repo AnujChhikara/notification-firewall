@@ -1,0 +1,115 @@
+package com.anuj.notificationfirewall.service
+
+import android.app.NotificationManager
+import android.content.Context
+import androidx.test.core.app.ApplicationProvider
+import com.anuj.notificationfirewall.data.prefs.SecurePrefs
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
+
+@RunWith(RobolectricTestRunner::class)
+class ArmingControllerTest {
+
+    private lateinit var context: Context
+    private lateinit var nm: NotificationManager
+    private lateinit var prefs: SecurePrefs
+    private lateinit var arming: ArmingController
+
+    @Before
+    fun setUp() {
+        context = ApplicationProvider.getApplicationContext()
+        nm = context.getSystemService(NotificationManager::class.java)
+        shadowOf(nm).setNotificationPolicyAccessGranted(true)
+        prefs = SecurePrefs(context.getSharedPreferences("test-arm", Context.MODE_PRIVATE))
+        prefs.listenerConnected = true
+        arming = ArmingController(context, DndController(context, prefs), prefs)
+    }
+
+    @Test
+    fun startsDisarmed() {
+        assertEquals(WallState.DISARMED, arming.state())
+        assertFalse(arming.isArmed())
+    }
+
+    @Test
+    fun armTurnsOnDndAndReportsArmed() {
+        assertEquals(WallState.ARMED, arming.arm())
+        assertEquals(NotificationManager.INTERRUPTION_FILTER_PRIORITY, nm.currentInterruptionFilter)
+        assertTrue(arming.isArmed())
+    }
+
+    @Test
+    fun disarmTurnsOffDndAndReportsDisarmed() {
+        arming.arm()
+        assertEquals(WallState.DISARMED, arming.disarm())
+        assertFalse(arming.isArmed())
+    }
+
+    @Test
+    fun externalDndOffDisarmsTheWall() {
+        arming.arm()
+
+        // The user flips DND off from the system shade.
+        nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
+
+        assertEquals(
+            "armed state must follow the system, not a stored flag",
+            WallState.DISARMED,
+            arming.state(),
+        )
+        assertFalse(arming.isArmed())
+    }
+
+    @Test
+    fun externalDndOffDoesNotReArmItself() {
+        arming.arm()
+        nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
+
+        arming.onSystemDndChanged()
+        arming.state()
+
+        assertEquals(NotificationManager.INTERRUPTION_FILTER_ALL, nm.currentInterruptionFilter)
+        assertEquals(WallState.DISARMED, arming.state())
+    }
+
+    @Test
+    fun externalDndOffClearsOwnershipSoALaterDisarmDoesNotClobberUserDnd() {
+        arming.arm()
+        nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
+        arming.onSystemDndChanged()
+
+        assertFalse("the app no longer owns DND", prefs.dndSetByApp)
+    }
+
+    @Test
+    fun missingPolicyAccessIsReportedAsBlocked() {
+        shadowOf(nm).setNotificationPolicyAccessGranted(false)
+        assertEquals(WallState.BLOCKED_NO_POLICY_ACCESS, arming.state())
+    }
+
+    @Test
+    fun missingListenerIsReportedAsBlocked() {
+        prefs.listenerConnected = false
+        assertEquals(WallState.BLOCKED_NO_LISTENER, arming.state())
+    }
+
+    @Test
+    fun armIsRefusedWithoutPolicyAccess() {
+        shadowOf(nm).setNotificationPolicyAccessGranted(false)
+        assertEquals(WallState.BLOCKED_NO_POLICY_ACCESS, arming.arm())
+    }
+
+    @Test
+    fun userOwnedDndDoesNotCountAsArmed() {
+        // DND on, but the app never turned it on.
+        nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
+        assertFalse(arming.isArmed())
+        assertEquals(WallState.DISARMED, arming.state())
+    }
+}

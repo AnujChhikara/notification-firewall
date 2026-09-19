@@ -7,7 +7,6 @@ import android.content.Context
 import android.os.Build
 import android.util.Log
 import com.anuj.notificationfirewall.data.prefs.SecurePrefs
-import com.anuj.notificationfirewall.domain.profile.ActiveProfile
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -36,15 +35,13 @@ class DndController @Inject constructor(
     private val securePrefs: SecurePrefs,
 ) {
     @Synchronized
-    fun reconcile(active: ActiveProfile?) {
+    fun apply(wantDnd: Boolean) {
         val nm = context.getSystemService(NotificationManager::class.java) ?: return
         if (!nm.isNotificationPolicyAccessGranted) return
 
-        val wantDnd = active?.autoDnd == true
-
         if (wantDnd) {
             if (!securePrefs.dndSetByApp) {
-                Log.i(TAG, "Enabling call-safe DND for '${active?.name}'")
+                Log.i(TAG, "Enabling call-safe DND")
                 saveCurrentPolicy(nm)
                 nm.notificationPolicy = callSafePolicy()
                 nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
