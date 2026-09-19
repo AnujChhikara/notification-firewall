@@ -9,6 +9,8 @@ import com.anuj.notificationfirewall.domain.wall.WallBucket
 import com.anuj.notificationfirewall.domain.wall.WallDecisionSource
 import kotlinx.coroutines.flow.Flow
 
+data class BucketCount(val bucket: WallBucket, val count: Int)
+
 @Dao
 interface NotificationDao {
     @Insert
@@ -72,4 +74,10 @@ interface NotificationDao {
             "WHERE timestampEpochMs < :cutoffMs AND textPurgedAt IS NULL",
     )
     suspend fun purgeTextBefore(cutoffMs: Long, nowMs: Long): Int
+
+    @Query(
+        "SELECT bucket, COUNT(*) AS count FROM notifications " +
+            "WHERE timestampEpochMs BETWEEN :startMs AND :endMs GROUP BY bucket",
+    )
+    suspend fun countsForDay(startMs: Long, endMs: Long): List<BucketCount>
 }
