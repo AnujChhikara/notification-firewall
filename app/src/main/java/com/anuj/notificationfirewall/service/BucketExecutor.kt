@@ -65,6 +65,25 @@ class BucketExecutor(
                 // re-post on the bypass channel is the only thing that can
                 // actually alert. Cancel the silent original so the tray does
                 // not show the same notification twice.
+                //
+                // The permission check MUST run here, before cancelOriginal(),
+                // not be left solely to repost()'s own guard: repost() no-ops
+                // silently when POST_NOTIFICATIONS is missing, and if we had
+                // already cancelled the original by then the notification would
+                // be destroyed outright -- worse than DROP, and inflicted on
+                // exactly the notifications judged most important. Checking
+                // first lets us degrade to the SILENCE behaviour instead, so the
+                // original stays visible (just silent) rather than vanishing.
+                // Do not re-inline this ahead of cancelOriginal.
+                if (!hasPostPermission()) {
+                    Log.w(
+                        TAG,
+                        "POST_NOTIFICATIONS not granted; degrading RING to SILENCE for " +
+                            "${sbn.key} so the original is not lost",
+                    )
+                    cancelOurRepost(sbn)
+                    return
+                }
                 cancelOriginal(sbn)
                 repost(sbn, channelManager.ringChannelId())
             }
@@ -103,16 +122,17 @@ class BucketExecutor(
         active.cancelNotification(sbn.key)
     }
 
+    private fun hasPostPermission(): Boolean =
+        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+
     private fun repost(sbn: StatusBarNotification, channelId: String) {
         // Android 13+ requires the runtime POST_NOTIFICATIONS permission to
-        // post any notification, including this re-post. The onboarding/
-        // settings UI task is responsible for requesting it from the user;
-        // here we just guard defensively so a not-yet-granted permission
-        // degrades to "original stays cancelled, nothing re-posted"
-        // instead of crashing the listener process with a SecurityException.
-        if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
+        // post any notification, including this re-post. The RING branch in
+        // execute() already checks this before it ever calls repost(), so this
+        // is defence in depth (e.g. a future caller of repost() added without
+        // going through execute()) rather than the sole guard.
+        if (!hasPostPermission()) {
             Log.w(TAG, "POST_NOTIFICATIONS not granted; cannot repost ${sbn.key}")
             return
         }
