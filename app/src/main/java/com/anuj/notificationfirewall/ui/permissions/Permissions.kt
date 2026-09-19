@@ -87,6 +87,12 @@ object Permissions {
     fun dndAccessIntent(): Intent =
         Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)
 
+    /** Opens this app's notification settings page, where POST_NOTIFICATIONS
+     *  (API 33+) and the notification channels themselves can be granted. */
+    fun appNotificationSettingsIntent(context: Context): Intent =
+        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+
     @Suppress("BatteryLife")
     fun batteryExemptionIntent(context: Context): Intent =
         Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)

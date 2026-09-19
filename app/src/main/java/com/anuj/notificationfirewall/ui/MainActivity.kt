@@ -32,6 +32,7 @@ import com.anuj.notificationfirewall.ui.digest.DigestScreen
 import com.anuj.notificationfirewall.ui.home.HomeScreen
 import com.anuj.notificationfirewall.ui.inbox.InboxScreen
 import com.anuj.notificationfirewall.ui.onboarding.OnboardingScreen
+import com.anuj.notificationfirewall.ui.settings.KeysScreen
 import com.anuj.notificationfirewall.ui.settings.SettingsScreen
 import com.anuj.notificationfirewall.ui.theme.NfTheme
 import dagger.hilt.android.AndroidEntryPoint
@@ -48,6 +49,7 @@ object Routes {
     const val INBOX = "inbox"
     const val SETTINGS = "settings"
     const val DIGEST = "digest"
+    const val KEYS = "keys"
 }
 
 @HiltViewModel
@@ -128,5 +130,6 @@ private fun NfNavGraph(nav: NavHostController, startDestination: String) {
         composable(Routes.INBOX) { InboxScreen(nav) }
         composable(Routes.SETTINGS) { SettingsScreen(nav) }
         composable(Routes.DIGEST) { DigestScreen(nav) }
+        composable(Routes.KEYS) { KeysScreen(nav) }
     }
 }
