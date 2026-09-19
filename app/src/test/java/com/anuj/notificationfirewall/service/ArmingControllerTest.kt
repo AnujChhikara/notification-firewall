@@ -1,5 +1,6 @@
 package com.anuj.notificationfirewall.service
 
+import android.app.Application
 import android.app.NotificationManager
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
@@ -111,5 +112,26 @@ class ArmingControllerTest {
         nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
         assertFalse(arming.isArmed())
         assertEquals(WallState.DISARMED, arming.state())
+    }
+
+    @Test
+    fun armStartsKeepAliveService() {
+        arming.arm()
+
+        val started = shadowOf(ApplicationProvider.getApplicationContext<Application>()).nextStartedService
+        assertEquals(
+            "arm() must start KeepAliveService or aggressive OEMs can kill the listener",
+            KeepAliveService::class.java.name,
+            started?.component?.className,
+        )
+    }
+
+    @Test
+    fun disarmStopsKeepAliveService() {
+        arming.arm()
+        arming.disarm()
+
+        val stopped = shadowOf(ApplicationProvider.getApplicationContext<Application>()).nextStoppedService
+        assertEquals(KeepAliveService::class.java.name, stopped?.component?.className)
     }
 }

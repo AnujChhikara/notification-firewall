@@ -67,12 +67,17 @@ class ArmingController @Inject constructor(
         if (!nm.isNotificationPolicyAccessGranted) return WallState.BLOCKED_NO_POLICY_ACCESS
 
         dndController.apply(wantDnd = true)
+        // KeepAliveService self-verifies armed state on every start and stops
+        // itself if not armed, so calling this unconditionally on a successful
+        // arm is safe and idempotent.
+        KeepAliveService.start(context)
         changes.tryEmit(Unit)
         return state()
     }
 
     fun disarm(): WallState {
         dndController.apply(wantDnd = false)
+        KeepAliveService.stop(context)
         changes.tryEmit(Unit)
         return state()
     }
