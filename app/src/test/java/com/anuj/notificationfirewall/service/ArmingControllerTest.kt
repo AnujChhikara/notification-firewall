@@ -107,6 +107,22 @@ class ArmingControllerTest {
     }
 
     @Test
+    fun armIsRefusedWithoutAConnectedListener() {
+        // Arming with the listener down would put the phone into system DND
+        // while state() reports BLOCKED_NO_LISTENER, suppressing the user's
+        // notifications with nothing to re-post them. arm() must refuse
+        // before ever touching DND.
+        prefs.listenerConnected = false
+
+        assertEquals(WallState.BLOCKED_NO_LISTENER, arming.arm())
+        assertEquals(
+            "a refused arm must never change the system interruption filter",
+            NotificationManager.INTERRUPTION_FILTER_ALL,
+            nm.currentInterruptionFilter,
+        )
+    }
+
+    @Test
     fun userOwnedDndDoesNotCountAsArmed() {
         // DND on, but the app never turned it on.
         nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)

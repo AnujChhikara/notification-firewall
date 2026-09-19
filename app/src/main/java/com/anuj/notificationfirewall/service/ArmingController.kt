@@ -65,6 +65,13 @@ class ArmingController @Inject constructor(
     fun arm(): WallState {
         val nm = notificationManager ?: return WallState.BLOCKED_NO_POLICY_ACCESS
         if (!nm.isNotificationPolicyAccessGranted) return WallState.BLOCKED_NO_POLICY_ACCESS
+        // Refuse before touching DND: arming with the listener down would put
+        // the phone into system DND while state() reports BLOCKED_NO_LISTENER
+        // -- the OS would then suppress the user's notifications and nothing
+        // re-posts them. Gating this here, in the controller, rather than in
+        // one UI caller, means every caller (including a future Quick
+        // Settings tile) gets the same safe contract.
+        if (!securePrefs.listenerConnected) return WallState.BLOCKED_NO_LISTENER
 
         dndController.apply(wantDnd = true)
         // KeepAliveService self-verifies armed state on every start and stops
