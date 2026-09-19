@@ -16,12 +16,18 @@
          the battery-optimization exemption prompt. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
-    <!-- Reliability: keep-alive foreground service while a profile is active. -->
+    <!-- Reliability: keep-alive foreground service (KeepAliveService) that runs
+         only while the wall is armed, so aggressive OEMs don't kill the
+         notification listener. See ArmingController.arm()/disarm(). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
-    <!-- Reliability: exact alarms drive precise profile start/end boundaries and
-         are a valid context for launching the keep-alive service. -->
+    <!-- Declared so Permissions.exactAlarmsAllowed()/exactAlarmSettingsIntent()
+         can surface this grant in Settings, but nothing in the current wall
+         model actually schedules an AlarmManager exact alarm: that was the
+         now-deleted profile layer's start/end boundary scheduling. Kept
+         declared (rather than dropped) only because the Settings screen still
+         shows and requests this permission; revisit if that UI is removed. -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
@@ -88,7 +94,10 @@
 
         <!-- WorkManager on-demand initialization: remove the default
              initializer so our Hilt-aware Configuration.Provider (NfApplication)
-             supplies the HiltWorkerFactory for DigestWorker. -->
+             supplies the HiltWorkerFactory every @HiltWorker needs to be
+             constructed with its injected dependencies: ReclassifyWorker and
+             MaintenanceWorker (both scheduled by WallWorkScheduler) as well as
+             the on-demand DigestWorker. -->
         <provider
             android:name="androidx.startup.InitializationProvider"
             android:authorities="${applicationId}.androidx-startup"

@@ -1,7 +1,6 @@
 package com.anuj.notificationfirewall.data.db.dao
 
 import androidx.room.Dao
-import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Upsert
 import com.anuj.notificationfirewall.data.db.VerdictCacheEntity

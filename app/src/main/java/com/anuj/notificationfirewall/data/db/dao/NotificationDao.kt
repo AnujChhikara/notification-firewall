@@ -56,8 +56,15 @@ interface NotificationDao {
      * satisfy [applyVerdict]'s non-nullable signature. SQL aggregates skip
      * NULLs, so stats and Ask stay accurate instead of averaging in a fake
      * verdict.
+     *
+     * decisionSource becomes EXPIRED, not left at PENDING: "pending = false"
+     * with "source = PENDING" would describe a state no consumer expects
+     * (pending implies a verdict is still coming), and LEGACY would be wrong
+     * too -- LEGACY means a verdict WAS produced, by an earlier app version.
+     * EXPIRED says plainly that the text was purged before a verdict could
+     * ever be obtained.
      */
-    @Query("UPDATE notifications SET pendingClassification = 0 WHERE id = :id")
+    @Query("UPDATE notifications SET pendingClassification = 0, decisionSource = 'EXPIRED' WHERE id = :id")
     suspend fun clearPending(id: Long)
 
     @Query(

@@ -58,9 +58,14 @@ object WallWorkScheduler {
         // minutes instead of once a day costs effectively nothing. Do not
         // "optimize" this back down to a daily interval for retention's sake
         // — that would silently stretch listener-death detection to 24h.
+        // UPDATE, not KEEP: this worker's cadence has already been revised
+        // once (see the interval comment above), and UPDATE means a future
+        // change to its schedule reaches existing installs on their next app
+        // start instead of requiring another unique-name migration like the
+        // one above for LEGACY_MAINTENANCE.
         wm.enqueueUniquePeriodicWork(
             MAINTENANCE,
-            ExistingPeriodicWorkPolicy.KEEP,
+            ExistingPeriodicWorkPolicy.UPDATE,
             PeriodicWorkRequestBuilder<MaintenanceWorker>(15, TimeUnit.MINUTES).build(),
         )
     }

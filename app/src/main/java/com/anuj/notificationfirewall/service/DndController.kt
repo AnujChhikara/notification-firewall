@@ -14,12 +14,12 @@ import javax.inject.Singleton
 private const val TAG = "DndController"
 
 /**
- * Keeps system Do Not Disturb in sync with the active profile. When an auto-DND
- * profile is active we switch the phone to DND (priority) so the OS silences
- * app notifications the instant they arrive — the only reliable way to prevent
+ * Keeps system Do Not Disturb in sync with the wall's armed state. While the
+ * wall is armed we switch the phone to DND (priority) so the OS silences app
+ * notifications the instant they arrive — the only reliable way to prevent
  * the sound, since a NotificationListenerService is notified only *after* the
- * system already alerted. The firewall's "important" rules re-post on a
- * DND-bypass channel, so only those ring.
+ * system already alerted. The wall's RING bucket re-posts on a DND-bypass
+ * channel, so only those notifications ring.
  *
  * Crucially, our DND is **call-safe**: before enabling it we overwrite the DND
  * policy to always allow phone calls (from anyone), repeat callers, and alarms,

@@ -31,7 +31,8 @@ internal fun extractEmailDomain(raw: String?): String? {
 }
 
 /**
- * Extracts the domain-relevant fields the rule engine / AI need from a posted
+ * Extracts the domain-relevant fields [com.anuj.notificationfirewall.domain.wall.WallPipeline]
+ * and Jev need from a posted
  * [StatusBarNotification]. Everything here is best-effort: messaging apps vary
  * wildly in how they populate a notification's extras, so missing data degrades
  * to empty strings / false / null rather than dropping the notification.

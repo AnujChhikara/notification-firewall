@@ -9,8 +9,14 @@ package com.anuj.notificationfirewall.domain.wall
  */
 enum class WallBucket { RING, SILENCE, DROP }
 
-/** Which stage of the pipeline produced the decision. */
-enum class WallDecisionSource { OTP, VIP, BLOCK, CACHE, JEV, PENDING, LEGACY }
+/**
+ * Which stage of the pipeline produced the decision.
+ *
+ * EXPIRED means the record's text was purged by retention before a verdict
+ * could ever be obtained for it -- distinct from LEGACY, which means the
+ * record WAS judged, just by an earlier version of the app's scoring model.
+ */
+enum class WallDecisionSource { OTP, VIP, BLOCK, CACHE, JEV, PENDING, LEGACY, EXPIRED }
 
 enum class OverrideKind { VIP, BLOCK }
 

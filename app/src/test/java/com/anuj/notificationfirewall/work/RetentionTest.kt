@@ -159,5 +159,10 @@ class RetentionTest {
         assertNull("no verdict was ever computed; importance must stay NULL", record.importanceScore)
         assertNull("no verdict was ever computed; category must stay NULL", record.category)
         assertNull("no verdict was ever computed; confidence must stay NULL", record.jevConfidence)
+        assertEquals(
+            "text was purged before a verdict could be obtained, not judged by an old app version",
+            WallDecisionSource.EXPIRED,
+            record.decisionSource,
+        )
     }
 }
