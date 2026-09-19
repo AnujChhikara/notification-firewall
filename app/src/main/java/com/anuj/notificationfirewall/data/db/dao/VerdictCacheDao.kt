@@ -8,17 +8,26 @@ import com.anuj.notificationfirewall.data.db.VerdictCacheEntity
 
 @Dao
 interface VerdictCacheDao {
-    @Query("SELECT * FROM verdict_cache WHERE contentShape = :shape")
-    suspend fun find(shape: String): VerdictCacheEntity?
+    @Query(
+        "SELECT * FROM verdict_cache WHERE packageName = :packageName AND senderKey = :senderKey " +
+            "AND contentShape = :shape",
+    )
+    suspend fun find(packageName: String, senderKey: String, shape: String): VerdictCacheEntity?
 
     @Upsert
     suspend fun upsert(entry: VerdictCacheEntity)
 
-    @Query("UPDATE verdict_cache SET hitCount = hitCount + 1, lastUsedEpochMs = :nowMs WHERE contentShape = :shape")
-    suspend fun recordHit(shape: String, nowMs: Long)
+    @Query(
+        "UPDATE verdict_cache SET hitCount = hitCount + 1, lastUsedEpochMs = :nowMs " +
+            "WHERE packageName = :packageName AND senderKey = :senderKey AND contentShape = :shape",
+    )
+    suspend fun recordHit(packageName: String, senderKey: String, shape: String, nowMs: Long)
 
-    @Query("DELETE FROM verdict_cache WHERE contentShape = :shape")
-    suspend fun evict(shape: String)
+    @Query(
+        "DELETE FROM verdict_cache WHERE packageName = :packageName AND senderKey = :senderKey " +
+            "AND contentShape = :shape",
+    )
+    suspend fun evict(packageName: String, senderKey: String, shape: String)
 
     @Query("DELETE FROM verdict_cache WHERE lastUsedEpochMs < :cutoffMs")
     suspend fun evictUnusedSince(cutoffMs: Long): Int

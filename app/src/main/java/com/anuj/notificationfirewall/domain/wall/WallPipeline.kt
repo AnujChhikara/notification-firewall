@@ -60,7 +60,7 @@ class WallPipeline(
 
         val appliedBias = bias.biasFor(n.packageName, sender)
 
-        cache.get(shape)?.let { cached ->
+        cache.get(n.packageName, sender, shape)?.let { cached ->
             return decided(cached, WallDecisionSource.CACHE, appliedBias, shape)
         }
 

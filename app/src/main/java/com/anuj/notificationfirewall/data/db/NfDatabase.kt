@@ -140,6 +140,45 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
     }
 }
 
+/**
+ * Widens the verdict cache key from `contentShape` alone to the
+ * `(packageName, senderKey, contentShape)` triple design spec §3.3 specifies,
+ * so two different apps posting identically-worded machine text no longer
+ * share -- or silently overwrite -- one cached verdict.
+ *
+ * `verdict_cache` is a pure cache: every row is fully derivable by re-asking
+ * Jev on the next miss, and nothing else in the schema references it by
+ * foreign key. So rather than rewriting each row to the new key shape (which
+ * would also require inventing a `senderKey` sentinel for old NULL rows), this
+ * migration just drops and recreates the table empty. The first classification
+ * after upgrade for any given shape costs one extra Jev call; nothing is lost
+ * or corrupted, since a cache is defined by being safe to discard.
+ */
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("DROP TABLE IF EXISTS verdict_cache")
+        db.execSQL(
+            """
+            CREATE TABLE verdict_cache (
+                packageName TEXT NOT NULL,
+                senderKey TEXT NOT NULL,
+                contentShape TEXT NOT NULL,
+                importance REAL NOT NULL,
+                category TEXT NOT NULL,
+                isTimeSensitive REAL NOT NULL,
+                isFromHuman REAL NOT NULL,
+                needsAction REAL NOT NULL,
+                confidence REAL NOT NULL,
+                hitCount INTEGER NOT NULL,
+                createdAtEpochMs INTEGER NOT NULL,
+                lastUsedEpochMs INTEGER NOT NULL,
+                PRIMARY KEY (packageName, senderKey, contentShape)
+            )
+            """.trimIndent(),
+        )
+    }
+}
+
 @Database(
     entities = [
         NotificationRecordEntity::class,
@@ -147,7 +186,7 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
         SenderBiasEntity::class,
         OverrideEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)

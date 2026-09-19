@@ -53,7 +53,7 @@ class VerdictCacheTest {
     fun machineSenderHighConfidence_isCachedAndReadBack() = runTest {
         assertTrue(cache.put("shape1", "com.myntra", "Myntra", verdict()))
 
-        val found = cache.get("shape1")
+        val found = cache.get("com.myntra", "Myntra", "shape1")
         assertNotNull(found)
         assertEquals(1.4f, found!!.importance, 0.001f)
         assertEquals(NotificationCategory.PROMOTION, found.category)
@@ -64,48 +64,48 @@ class VerdictCacheTest {
         val stored = cache.put("shape2", "com.whatsapp", "Mom", verdict(fromHuman = 0.7f))
 
         assertFalse(stored)
-        assertNull(cache.get("shape2"))
+        assertNull(cache.get("com.whatsapp", "Mom", "shape2"))
     }
 
     @Test
     fun humanSenderWellAboveThresholdIsNeverCached() = runTest {
         assertFalse(cache.put("shape3", "com.whatsapp", "Mom", verdict(fromHuman = 0.98f)))
-        assertNull(cache.get("shape3"))
+        assertNull(cache.get("com.whatsapp", "Mom", "shape3"))
     }
 
     @Test
     fun justBelowHumanThresholdIsStillCached() = runTest {
         assertTrue(cache.put("shape4", "com.linkedin", "LinkedIn", verdict(fromHuman = 0.69f)))
-        assertNotNull(cache.get("shape4"))
+        assertNotNull(cache.get("com.linkedin", "LinkedIn", "shape4"))
     }
 
     @Test
     fun lowConfidenceIsNeverCached() = runTest {
         assertFalse(cache.put("shape5", "com.myntra", "Myntra", verdict(confidence = 0.59f)))
-        assertNull(cache.get("shape5"))
+        assertNull(cache.get("com.myntra", "Myntra", "shape5"))
     }
 
     @Test
     fun confidenceAtThresholdIsCached() = runTest {
         assertTrue(cache.put("shape6", "com.myntra", "Myntra", verdict(confidence = 0.6f)))
-        assertNotNull(cache.get("shape6"))
+        assertNotNull(cache.get("com.myntra", "Myntra", "shape6"))
     }
 
     @Test
     fun readingAVerdictRecordsAHit() = runTest {
         cache.put("shape7", "com.myntra", "Myntra", verdict())
-        cache.get("shape7")
-        cache.get("shape7")
+        cache.get("com.myntra", "Myntra", "shape7")
+        cache.get("com.myntra", "Myntra", "shape7")
 
-        val entry = db.verdictCacheDao().find("shape7")!!
+        val entry = db.verdictCacheDao().find("com.myntra", "Myntra", "shape7")!!
         assertEquals(2, entry.hitCount)
     }
 
     @Test
     fun evictRemovesTheEntry() = runTest {
         cache.put("shape8", "com.myntra", "Myntra", verdict())
-        cache.evict("shape8")
-        assertNull(cache.get("shape8"))
+        cache.evict("com.myntra", "Myntra", "shape8")
+        assertNull(cache.get("com.myntra", "Myntra", "shape8"))
     }
 
     @Test
@@ -117,12 +117,51 @@ class VerdictCacheTest {
         val removed = cache.evictStale(maxAgeDays = 90)
 
         assertEquals(1, removed)
-        assertNull(cache.get("old"))
-        assertNotNull(cache.get("fresh"))
+        assertNull(cache.get("com.a", "A", "old"))
+        assertNotNull(cache.get("com.b", "B", "fresh"))
     }
 
     @Test
     fun missReturnsNull() = runTest {
-        assertNull(cache.get("never-stored"))
+        assertNull(cache.get("com.nothing", "Nobody", "never-stored"))
+    }
+
+    // ── Composite key (Finding 2) ───────────────────────────────────────────
+
+    @Test
+    fun twoDifferentPackagesWithTheSameContentShapeGetIndependentVerdicts() = runTest {
+        // Two different apps posting identically-worded machine text ("You have
+        // a new message") must never share a cache entry, or one app's verdict
+        // silently answers for the other's notifications.
+        cache.put("shared-shape", "com.appA", "SenderA", verdict(importance = 1.0f))
+        cache.put("shared-shape", "com.appB", "SenderB", verdict(importance = 4.5f))
+
+        val a = cache.get("com.appA", "SenderA", "shared-shape")
+        val b = cache.get("com.appB", "SenderB", "shared-shape")
+
+        assertNotNull(a)
+        assertNotNull(b)
+        assertEquals(1.0f, a!!.importance, 0.001f)
+        assertEquals(4.5f, b!!.importance, 0.001f)
+    }
+
+    @Test
+    fun writingTheSecondPackageDoesNotOverwriteTheFirstsAttribution() = runTest {
+        cache.put("shared-shape", "com.appA", "SenderA", verdict(importance = 1.0f))
+        cache.put("shared-shape", "com.appB", "SenderB", verdict(importance = 4.5f))
+
+        assertEquals(2, db.verdictCacheDao().count())
+    }
+
+    @Test
+    fun aNullSenderAndAnEmptyStringSenderAreTheSameCacheEntry() = runTest {
+        // senderKey is normalized to an empty-string sentinel at the cache
+        // boundary (Room composite primary keys cannot contain a NULL
+        // column), so null and "" must collide, not create two rows.
+        cache.put("shape9", "com.system", null, verdict())
+
+        assertNotNull(cache.get("com.system", "", "shape9"))
+        assertNotNull(cache.get("com.system", null, "shape9"))
+        assertEquals(1, db.verdictCacheDao().count())
     }
 }

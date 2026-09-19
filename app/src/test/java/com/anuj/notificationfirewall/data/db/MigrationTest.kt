@@ -252,4 +252,85 @@ class MigrationTest {
 
         db.close()
     }
+
+    /**
+     * Version-6 `verdict_cache` schema, exactly as MIGRATION_4_5 creates it
+     * (contentShape-only primary key, nullable senderKey).
+     */
+    private fun createV6VerdictCacheTable(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE verdict_cache (
+                contentShape TEXT PRIMARY KEY NOT NULL,
+                packageName TEXT NOT NULL,
+                senderKey TEXT,
+                importance REAL NOT NULL,
+                category TEXT NOT NULL,
+                isTimeSensitive REAL NOT NULL,
+                isFromHuman REAL NOT NULL,
+                needsAction REAL NOT NULL,
+                confidence REAL NOT NULL,
+                hitCount INTEGER NOT NULL,
+                createdAtEpochMs INTEGER NOT NULL,
+                lastUsedEpochMs INTEGER NOT NULL
+            )
+            """.trimIndent(),
+        )
+    }
+
+    @Test
+    fun migrate6To7_widensTheCacheKey_byDroppingAndRecreatingTheTable() {
+        val db = openInMemoryDb()
+        createV6VerdictCacheTable(db)
+
+        // Two different apps that happen to share a contentShape under the
+        // old key -- exactly the collision Finding 2 exists to fix. Under the
+        // old contentShape-only PRIMARY KEY, inserting the second row would
+        // NOT even be possible without first deleting/overwriting the first,
+        // demonstrating the old schema could not represent this at all.
+        db.execSQL(
+            """
+            INSERT INTO verdict_cache
+              (contentShape, packageName, senderKey, importance, category,
+               isTimeSensitive, isFromHuman, needsAction, confidence,
+               hitCount, createdAtEpochMs, lastUsedEpochMs)
+            VALUES ('s1', 'com.myntra', 'Myntra', 1.4, 'PROMOTION',
+                    0.1, 0.03, 0.05, 0.9, 3, 1700000000000, 1700000000000)
+            """.trimIndent(),
+        )
+
+        MIGRATION_6_7.migrate(db)
+
+        // Pure cache: the migration drops and recreates rather than copying,
+        // so the old row is gone and every entry rebuilds itself from Jev on
+        // the next miss.
+        db.query("SELECT COUNT(*) FROM verdict_cache").use { c ->
+            c.moveToFirst()
+            assertEquals(0, c.getInt(0))
+        }
+
+        // The new composite key now allows two different apps to hold
+        // independent verdicts for the identical contentShape -- impossible
+        // under the old schema.
+        db.execSQL(
+            """
+            INSERT INTO verdict_cache
+              (packageName, senderKey, contentShape, importance, category,
+               isTimeSensitive, isFromHuman, needsAction, confidence,
+               hitCount, createdAtEpochMs, lastUsedEpochMs)
+            VALUES
+              ('com.appA', 'SenderA', 'shared-shape', 1.0, 'PROMOTION',
+               0.1, 0.03, 0.05, 0.9, 0, 1700000000000, 1700000000000),
+              ('com.appB', 'SenderB', 'shared-shape', 4.5, 'PROMOTION',
+               0.1, 0.03, 0.05, 0.9, 0, 1700000000000, 1700000000000)
+            """.trimIndent(),
+        )
+
+        db.query("SELECT COUNT(*) FROM verdict_cache WHERE contentShape = 'shared-shape'").use { c ->
+            c.moveToFirst()
+            assertEquals(2, c.getInt(0))
+        }
+
+        db.close()
+    }
 }
