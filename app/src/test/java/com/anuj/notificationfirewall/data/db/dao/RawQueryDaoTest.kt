@@ -307,6 +307,8 @@ class RawQueryDaoTest {
                 "GROUP BY appLabel ORDER BY c DESC LIMIT 5",
             "SELECT category, COUNT(*) AS c FROM notifications " +
                 "WHERE decisionSource IN ('JEV', 'CACHE') GROUP BY category ORDER BY c DESC LIMIT 20",
+            "SELECT x.a FROM (SELECT packageName AS a, COUNT(*) AS n FROM notifications " +
+                "GROUP BY packageName) x LIMIT 5",
         )
         queries.forEach { sql ->
             assertTrue(sql, SqlValidator.validate(sql, allowContent = false) is SqlVerdict.Allowed)
@@ -413,6 +415,154 @@ class RawQueryDaoTest {
             fail("an unaccounted-for plan step must be rejected")
         } catch (e: UnsafeQueryException) {
             assertTrue(e.message!!, e.message!!.contains("SOMETHING NEW AND ODD"))
+        }
+    }
+
+    // --- Modern plan spellings the bundled SQLite cannot produce -------------
+
+    private val inSubquerySql =
+        "SELECT COUNT(*) AS c FROM notifications " +
+            "WHERE packageName IN (SELECT packageName FROM overrides) LIMIT 1"
+
+    private val derivedTableSql =
+        "SELECT x.a FROM (SELECT packageName AS a, COUNT(*) AS n FROM notifications " +
+            "GROUP BY packageName) x LIMIT 5"
+
+    @Test
+    fun aCreateBloomFilterStepIsAttributed() {
+        // SQLite >= 3.38 emits this for an IN (subquery) plan -- the exact
+        // shape realisticAggregateQueriesPassBothGatesAndRun covers, so before
+        // this fix that canary would have failed on any modern device.
+        RawQueryDao.assertPlanIsAttributable(
+            inSubquerySql,
+            listOf(
+                "SEARCH notifications USING COVERING INDEX index_notifications_packageName (packageName=?)",
+                "LIST SUBQUERY 1",
+                "SCAN overrides",
+                "CREATE BLOOM FILTER",
+            ),
+        )
+    }
+
+    @Test
+    fun aBloomFilterOnAnUnlistedTableIsStillRejected() {
+        // `CREATE BLOOM FILTER` names no table; `BLOOM FILTER ON t` does, and
+        // that one must still resolve.
+        try {
+            RawQueryDao.assertPlanIsAttributable(
+                inSubquerySql,
+                listOf("SCAN notifications", "BLOOM FILTER ON android_metadata (id=?)"),
+            )
+            fail("a bloom filter over an unlisted table must be rejected")
+        } catch (e: UnsafeQueryException) {
+            assertTrue(e.message!!, e.message!!.contains("android_metadata"))
+        }
+    }
+
+    @Test
+    fun aDerivedTableNamedByItsAliasIsAttributed() {
+        // SQLite >= 3.36 names the derived table by its alias, and no
+        // `FROM <identifier>` ever binds it.
+        RawQueryDao.assertPlanIsAttributable(
+            derivedTableSql,
+            listOf("CO-ROUTINE x", "SCAN x", "SCAN notifications", "USE TEMP B-TREE FOR GROUP BY"),
+        )
+    }
+
+    @Test
+    fun anUnaliasedDerivedTableIsAttributed() {
+        RawQueryDao.assertPlanIsAttributable(
+            "SELECT a FROM (SELECT packageName AS a FROM notifications) LIMIT 5",
+            listOf("CO-ROUTINE (subquery-1)", "SCAN (subquery-1)", "SCAN notifications"),
+        )
+    }
+
+    @Test
+    fun aDerivedTableAliasCannotStandInForAnUnlistedTable() {
+        // The subquery's own FROM is checked; the alias inherits that verdict
+        // rather than bypassing it.
+        try {
+            RawQueryDao.assertPlanIsAttributable(
+                "SELECT x.a FROM (SELECT packageName AS a FROM android_metadata) x LIMIT 5",
+                listOf("CO-ROUTINE x", "SCAN x"),
+            )
+            fail("a derived table over an unlisted table must be rejected")
+        } catch (e: UnsafeQueryException) {
+            assertTrue(e.message!!, e.message!!.contains("android_metadata"))
+        }
+    }
+
+    @Test
+    fun aParenthesisedJoinClauseAfterFromIsRejectedRatherThanBound() {
+        // SQLite's `table-or-subquery := ( join-clause )` production, the same
+        // one SqlValidator refuses. A group that does not open with SELECT
+        // introduces tables of its own and binds no trustworthy alias.
+        try {
+            RawQueryDao.assertPlanIsAttributable(
+                "SELECT c FROM (notifications, android_metadata) LIMIT 1",
+                listOf("SCAN notifications"),
+            )
+            fail("a parenthesised join clause must be rejected")
+        } catch (e: UnsafeQueryException) {
+            assertTrue(e.message!!, e.message!!.contains("parenthesised join clause"))
+        }
+    }
+
+    @Test
+    fun aJoinMarkerLineMustStillNameSomethingKnown() {
+        // LEFT-JOIN/RIGHT-JOIN lines name a table, so they resolve like a SCAN
+        // rather than being waved through as structural.
+        RawQueryDao.assertPlanIsAttributable(joinSql, listOf("SCAN n", "RIGHT-JOIN b"))
+        try {
+            RawQueryDao.assertPlanIsAttributable(joinSql, listOf("SCAN n", "RIGHT-JOIN android_metadata"))
+            fail("a join marker naming an unlisted table must be rejected")
+        } catch (e: UnsafeQueryException) {
+            assertTrue(e.message!!, e.message!!.contains("android_metadata"))
+        }
+    }
+
+    @Test
+    fun theStructuralPlanSpellingsAModernSqliteEmitsAreAllAttributed() {
+        // Audited against the query shapes SqlValidator permits. Each of these
+        // introduces no table of its own; anything that does name a table is
+        // resolved, not listed here.
+        listOf(
+            "USE TEMP B-TREE FOR ORDER BY",
+            "USE TEMP B-TREE FOR GROUP BY",
+            "USE TEMP B-TREE FOR DISTINCT",
+            "USE TEMP B-TREE FOR LAST TERM OF ORDER BY",
+            "CO-ROUTINE x",
+            "CO-ROUTINE (subquery-1)",
+            "MATERIALIZE x",
+            "MATERIALIZE (subquery-1)",
+            "SCALAR SUBQUERY 1",
+            "CORRELATED SCALAR SUBQUERY 1",
+            "LIST SUBQUERY 1",
+            "CORRELATED LIST SUBQUERY 1",
+            "CREATE BLOOM FILTER",
+            "MULTI-INDEX OR",
+            "INDEX 1",
+            "LEFT-JOIN",
+            "RIGHT-JOIN",
+        ).forEach { line ->
+            RawQueryDao.assertPlanIsAttributable(derivedTableSql, listOf("SCAN x", line))
+        }
+    }
+
+    @Test
+    fun theScanAndSearchSpellingsAModernSqliteEmitsAreAllAttributed() {
+        listOf(
+            "SCAN notifications",
+            "SCAN notifications AS n",
+            "SCAN notifications USING COVERING INDEX index_notifications_packageName",
+            "SEARCH notifications USING INTEGER PRIMARY KEY (rowid=?)",
+            "SEARCH notifications AS n USING AUTOMATIC PARTIAL COVERING INDEX (packageName=?)",
+            "SCAN CONSTANT ROW",
+            "SCAN (subquery-1)",
+            "SCAN 1",
+            "SCAN TABLE notifications AS n",
+        ).forEach { line ->
+            RawQueryDao.assertPlanIsAttributable(joinSql, listOf(line))
         }
     }
 

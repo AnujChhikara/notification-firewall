@@ -167,11 +167,28 @@ class RawQueryDao(private val db: NfDatabase) {
             Regex("""^(?:SCAN|SEARCH)\s+(?:TABLE\s+)?(.+)$""", RegexOption.IGNORE_CASE)
         private val BLOOM_LINE = Regex("""^BLOOM FILTER ON\s+(.+)$""", RegexOption.IGNORE_CASE)
 
+        /**
+         * `LEFT-JOIN t` / `RIGHT-JOIN t` name a table, so they are treated as
+         * target-naming lines rather than waved through as structural. The
+         * bare, table-less spellings stay in [STRUCTURAL_PLAN_LINES].
+         */
+        private val JOIN_MARKER_LINE =
+            Regex("""^(?:LEFT-JOIN|RIGHT-JOIN)\s+(.+)$""", RegexOption.IGNORE_CASE)
+
+        /** SQLite >= 3.36 names an unaliased derived table `(subquery-N)`. */
+        private val SUBQUERY_HEAD = Regex("""^\(subquery-\d+\)$""", RegexOption.IGNORE_CASE)
+
         /** `FROM t`, `JOIN t alias`, `FROM t AS alias`. */
         private val FROM_OR_JOIN = Regex(
             """\b(?:from|join)\s+([a-z_][a-z0-9_]*)(?:\s+(?:as\s+)?([a-z_][a-z0-9_]*))?""",
             RegexOption.IGNORE_CASE,
         )
+
+        /** `FROM (`, `JOIN (` — a derived table, or a parenthesised join clause. */
+        private val FROM_OR_JOIN_PAREN = Regex("""\b(?:from|join)\s*\(""", RegexOption.IGNORE_CASE)
+
+        /** The alias bound to a derived table: `) x`, `) AS x`. */
+        private val TRAILING_ALIAS = Regex("""^\s*(?:as\s+)?([a-z_][a-z0-9_]*)""", RegexOption.IGNORE_CASE)
 
         /**
          * Words that may follow a table name without being an alias. Without
@@ -197,6 +214,11 @@ class RawQueryDao(private val db: NfDatabase) {
             Regex("""^MULTI-INDEX OR$""", RegexOption.IGNORE_CASE),
             Regex("""^INDEX \d+$""", RegexOption.IGNORE_CASE),
             Regex("""^(?:LEFT-JOIN|RIGHT-JOIN|BLOCKED BY .+)$""", RegexOption.IGNORE_CASE),
+            // SQLite >= 3.38 emits this alongside a LIST SUBQUERY plan, which
+            // is what `IN (SELECT …)` compiles to -- i.e. for a query shape the
+            // validator explicitly permits. It names no table: the filter is
+            // built from the subquery whose own lines are checked separately.
+            Regex("""^CREATE BLOOM FILTER$""", RegexOption.IGNORE_CASE),
         )
 
         fun isContentColumn(name: String): Boolean {
@@ -261,8 +283,71 @@ class RawQueryDao(private val db: NfDatabase) {
                 val alias = match.groupValues[2].lowercase()
                 if (alias.isNotEmpty() && alias !in NOT_AN_ALIAS) names += alias
             }
+            // Derived tables: `FROM (SELECT …) x`. SQLite >= 3.36 names such a
+            // table by its alias in the plan (`SCAN x`), and that alias is
+            // bound by no `FROM <identifier>`, so without this a shape the
+            // validator explicitly permits would be refused here.
+            //
+            // Binding these cannot loosen the check. A group is only walked
+            // when it opens with SELECT -- a parenthesised join clause is
+            // rejected outright, exactly as SqlValidator rejects it -- and a
+            // subquery introduces no table of its own: every table it reads
+            // appears as its own `FROM <identifier>` in this same string and is
+            // allow-listed by the loop above, or else surfaces as its own plan
+            // line and is checked there. The alias inherits that check; it
+            // never substitutes for it.
+            for (match in FROM_OR_JOIN_PAREN.findAll(masked)) {
+                val open = match.range.last
+                if (!groupOpensWithSelect(masked, open)) {
+                    throw UnsafeQueryException(
+                        "A parenthesised join clause is not supported after FROM/JOIN; " +
+                            "only a subquery is permitted",
+                    )
+                }
+                val close = matchingParen(masked, open)
+                    ?: throw UnsafeQueryException("Unbalanced parentheses in the statement")
+                val alias = TRAILING_ALIAS.find(masked.substring(close + 1))?.groupValues?.get(1)
+                    ?.lowercase()
+                if (alias != null && alias !in NOT_AN_ALIAS) names += alias
+            }
+
             if (names.isEmpty()) throw UnsafeQueryException("The statement names no table to read")
             return names
+        }
+
+        /**
+         * Does the group opened at [openParenIdx] begin with SELECT — i.e. is
+         * it an ordinary subquery rather than a parenthesised join clause?
+         * Redundant wrapping parens are walked through, as SQLite allows
+         * `((SELECT …))`. Iterative: the nesting depth is attacker-chosen.
+         */
+        private fun groupOpensWithSelect(masked: String, openParenIdx: Int): Boolean {
+            var open = openParenIdx
+            while (true) {
+                var i = open + 1
+                while (i < masked.length && masked[i].isWhitespace()) i++
+                if (i >= masked.length) return false
+                if (masked[i] != '(') {
+                    return masked.regionMatches(i, "select", 0, 6, ignoreCase = true) &&
+                        (i + 6 >= masked.length || !masked[i + 6].isLetterOrDigit())
+                }
+                open = i
+            }
+        }
+
+        /** Index of the `)` closing the group opened at [openParenIdx], or null. */
+        private fun matchingParen(masked: String, openParenIdx: Int): Int? {
+            var depth = 0
+            for (i in openParenIdx until masked.length) {
+                when (masked[i]) {
+                    '(' -> depth++
+                    ')' -> {
+                        depth--
+                        if (depth == 0) return i
+                    }
+                }
+            }
+            return null
         }
 
         /**
@@ -278,8 +363,13 @@ class RawQueryDao(private val db: NfDatabase) {
         private fun checkPlanLine(detail: String, resolvable: Set<String>) {
             val line = detail.trim()
 
+            // Structural steps are matched first: `CREATE BLOOM FILTER` must not
+            // be read as `BLOOM FILTER ON <table>` with a missing table.
+            if (STRUCTURAL_PLAN_LINES.any { it.matches(line) }) return
+
             val target = SCAN_LINE.find(line)?.groupValues?.get(1)
                 ?: BLOOM_LINE.find(line)?.groupValues?.get(1)
+                ?: JOIN_MARKER_LINE.find(line)?.groupValues?.get(1)
             if (target != null) {
                 val name = planTargetName(target, line)
                 if (name != null && name.lowercase() !in resolvable) {
@@ -289,8 +379,6 @@ class RawQueryDao(private val db: NfDatabase) {
                 }
                 return
             }
-
-            if (STRUCTURAL_PLAN_LINES.any { it.matches(line) }) return
 
             throw UnsafeQueryException("Unrecognised query plan step, refusing to run: $line")
         }
@@ -312,6 +400,7 @@ class RawQueryDao(private val db: NfDatabase) {
 
             if (head.equals("CONSTANT", ignoreCase = true)) return null
             if (head.equals("SUBQUERY", ignoreCase = true)) return null
+            if (SUBQUERY_HEAD.matches(head)) return null
             if (head.toIntOrNull() != null) return null
             if (!IDENTIFIER.matches(head)) {
                 throw UnsafeQueryException("Unrecognised query plan step, refusing to run: $line")
