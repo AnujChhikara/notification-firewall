@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -69,7 +70,8 @@ fun WallScreen(nav: NavHostController) {
         Column(
             modifier
                 .verticalScroll(rememberScrollState())
-                .padding(bottom = 24.dp),
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 112.dp),
         ) {
             val breakGlassUntilMs = ui.breakGlassUntilMs
             // Blocked states are checked first, ahead of the break-glass
@@ -185,7 +187,7 @@ private fun ToggleHero(state: WallState, onToggle: () -> Unit) {
     Column(
         Modifier
             .fillMaxWidth()
-            .height(260.dp)
+            .heightIn(min = 220.dp)
             .clip(shape)
             .background(c.surface)
             .border(2.dp, borderColor, shape)
@@ -237,7 +239,7 @@ private fun ToggleHero(state: WallState, onToggle: () -> Unit) {
 @Composable
 private fun DigestCard(digest: PersistedDigest) {
     val c = LocalWallColors.current
-    NfCard(Modifier.padding(4.dp)) {
+    NfCard {
         Column(Modifier.padding(20.dp)) {
             Text("Yesterday's digest", style = MaterialTheme.typography.titleMedium, color = c.title)
             Spacer(Modifier.height(6.dp))
