@@ -64,8 +64,11 @@ fun AskScreen(nav: NavHostController) {
         onPauseOrDispose {}
     }
 
-    LaunchedEffect(ui.messages.size) {
-        if (ui.messages.isNotEmpty()) listState.animateScrollToItem(ui.messages.size)
+    LaunchedEffect(ui.messages.size, ui.sending) {
+        if (ui.messages.isNotEmpty()) {
+            val lastItem = (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
+            listState.scrollToItem(lastItem)
+        }
     }
 
     NfScreen(title = "Ask", eyebrow = "Your history, answered on this phone") { modifier ->

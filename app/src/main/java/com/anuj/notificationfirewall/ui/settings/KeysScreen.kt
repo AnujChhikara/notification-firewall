@@ -3,9 +3,11 @@ package com.anuj.notificationfirewall.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
@@ -120,6 +122,7 @@ private sealed interface TestOutcome {
     data class Failure(val message: String) : TestOutcome
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun KeysScreen(nav: NavHostController, vm: KeysViewModel = hiltViewModel()) {
     val scope = rememberCoroutineScope()
@@ -145,8 +148,8 @@ fun KeysScreen(nav: NavHostController, vm: KeysViewModel = hiltViewModel()) {
             modifier = modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 100.dp),
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 112.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             SectionLabel("Jev — required")
@@ -180,7 +183,10 @@ fun KeysScreen(nav: NavHostController, vm: KeysViewModel = hiltViewModel()) {
                         colors = nfFieldColors(c),
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
                         NfButton(if (jevKeyVisible) "Hide" else "Show", primary = false, onClick = { jevKeyVisible = !jevKeyVisible })
                         NfButton(
                             "Save",
@@ -213,7 +219,10 @@ fun KeysScreen(nav: NavHostController, vm: KeysViewModel = hiltViewModel()) {
                         )
                     }
 
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
                         NfButton(
                             if (testing) "Testing…" else "Test Jev key",
                             primary = false,
@@ -292,7 +301,10 @@ fun KeysScreen(nav: NavHostController, vm: KeysViewModel = hiltViewModel()) {
                         colors = nfFieldColors(c),
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
                         NfButton(if (openAiKeyVisible) "Hide" else "Show", primary = false, onClick = { openAiKeyVisible = !openAiKeyVisible })
                         NfButton(
                             "Save",

@@ -102,8 +102,8 @@ fun SettingsScreen(nav: NavHostController, themeViewModel: ThemeViewModel) {
             modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 100.dp),
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 112.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             SectionLabel("Sensitivity")
@@ -410,10 +410,19 @@ private fun BehaviourCard(ui: SettingsUiState, vm: SettingsViewModel) {
 @Composable
 private fun Stepper(label: String, onDecrement: () -> Unit, onIncrement: () -> Unit) {
     val c = LocalWallColors.current
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        NfButton("−", primary = false, onClick = onDecrement)
-        Text(label, style = MaterialTheme.typography.titleMedium, color = c.text)
-        NfButton("+", primary = false, onClick = onIncrement)
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        NfButton("−", primary = false, onClick = onDecrement, modifier = Modifier.weight(1f))
+        Text(
+            label,
+            style = MaterialTheme.typography.titleMedium,
+            color = c.text,
+            modifier = Modifier.weight(1f),
+        )
+        NfButton("+", primary = false, onClick = onIncrement, modifier = Modifier.weight(1f))
     }
 }
 
@@ -523,9 +532,19 @@ private fun DataCard(
                     color = c.text,
                 )
             }
-            NfButton("Export history", primary = false, onClick = onExport)
+            NfButton(
+                "Export history",
+                primary = false,
+                onClick = onExport,
+                modifier = Modifier.fillMaxWidth(),
+            )
 
-            NfButton("Delete all history", primary = false, onClick = onDeleteHistory)
+            NfButton(
+                "Delete all history",
+                primary = false,
+                onClick = onDeleteHistory,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }
