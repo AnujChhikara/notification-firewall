@@ -1,8 +1,16 @@
 package com.anuj.notificationfirewall.ai
 
-import com.anuj.notificationfirewall.data.db.NotificationRecordEntity
-
-/** Summarizes notifications missed during a Do Not Disturb profile window. */
+/**
+ * Turns a day's [DigestData] into the one-line prose the daily digest
+ * notification leads with.
+ *
+ * Deliberately does NOT take the raw notification records, nor
+ * [DigestData.worthALook]: by the time anything reaches an implementation of
+ * this interface, the day has already been reduced to counts and an
+ * offender's app label. That is the privacy boundary for this feature -- see
+ * the KDoc on [OpenAiDigestService] for why [worthALook] never travels with
+ * it.
+ */
 interface DigestService {
-    suspend fun summarize(records: List<NotificationRecordEntity>): String
+    suspend fun summarise(data: DigestData): String
 }

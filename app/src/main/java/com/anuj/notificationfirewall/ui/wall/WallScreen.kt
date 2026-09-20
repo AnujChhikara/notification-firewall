@@ -113,7 +113,9 @@ fun WallScreen(nav: NavHostController) {
                 )
             }
 
-            // Digest card lands in Task 10.
+            // Task 10's brief scoped the daily digest to a posted system
+            // notification (DigestWorker/DigestScheduler), not a card on this
+            // screen -- no in-app digest surface exists here yet.
         }
     }
 }

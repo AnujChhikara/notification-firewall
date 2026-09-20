@@ -11,6 +11,7 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.work.Configuration
 import com.anuj.notificationfirewall.data.prefs.SecurePrefs
+import com.anuj.notificationfirewall.data.prefs.WallSettings
 import com.anuj.notificationfirewall.service.ArmingController
 import com.anuj.notificationfirewall.service.DndChangeReceiver
 import com.anuj.notificationfirewall.work.WallWorkScheduler
@@ -40,6 +41,7 @@ private const val TAG = "NfApplication"
 interface NfApplicationEntryPoint {
     fun securePrefs(): SecurePrefs
     fun armingController(): ArmingController
+    fun wallSettings(): WallSettings
 }
 
 @HiltAndroidApp
@@ -78,6 +80,15 @@ class NfApplication : Application(), Configuration.Provider {
         // and cache eviction). Idempotent, so calling it on every app start
         // is safe.
         WallWorkScheduler.scheduleAll(this)
+
+        // Same lazy-and-contained fetch as securePrefs above: WallSettings is
+        // backed by the same encrypted prefs, so it can fail the same way on
+        // a broken Keystore. Losing the digest schedule for one app start is
+        // an acceptable degradation; crashing launch is not.
+        runCatching {
+            val minute = entryPoint().wallSettings().digestTimeMinuteOfDay
+            WallWorkScheduler.scheduleDigest(this, minute)
+        }.onFailure { Log.w(TAG, "Could not schedule daily digest on startup", it) }
 
         // DndChangeReceiver must be registered at runtime, not in the manifest:
         // see the KDoc on DndChangeReceiver for why.

@@ -22,7 +22,12 @@ interface NotificationDao {
     @Query("SELECT * FROM notifications ORDER BY timestampEpochMs DESC LIMIT :limit")
     fun observeRecent(limit: Int = 500): Flow<List<NotificationRecordEntity>>
 
-    @Query("SELECT * FROM notifications WHERE timestampEpochMs BETWEEN :startMs AND :endMs ORDER BY timestampEpochMs")
+    /**
+     * Half-open range, like [countsForDay]: `>= startMs AND < endMs`, so a
+     * record landing exactly on a day boundary belongs to exactly one day
+     * instead of being double-counted by adjacent windows.
+     */
+    @Query("SELECT * FROM notifications WHERE timestampEpochMs >= :startMs AND timestampEpochMs < :endMs ORDER BY timestampEpochMs")
     suspend fun recordsBetween(startMs: Long, endMs: Long): List<NotificationRecordEntity>
 
     @Query("SELECT * FROM notifications WHERE pendingClassification = 1 ORDER BY timestampEpochMs LIMIT :limit")

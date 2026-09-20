@@ -35,8 +35,10 @@ class WallSettings(private val prefs: SharedPreferences) {
 
     /**
      * When the daily digest fires, as minutes since midnight (0–1439).
-     * Nothing schedules against this yet (see [com.anuj.notificationfirewall.work.DigestScheduler]) —
-     * Settings owns the knob; Task 10 (daily digest) wires the trigger to it.
+     * Read by [com.anuj.notificationfirewall.work.WallWorkScheduler] at app
+     * start and by Settings on every change to (re)schedule
+     * [com.anuj.notificationfirewall.work.DigestWorker] via
+     * [com.anuj.notificationfirewall.work.DigestScheduler].
      */
     var digestTimeMinuteOfDay: Int
         get() = prefs.getInt(KEY_DIGEST_TIME_MINUTE, DEFAULT_DIGEST_TIME_MINUTE)

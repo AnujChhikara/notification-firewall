@@ -17,6 +17,7 @@ import com.anuj.notificationfirewall.domain.wall.VerdictCache
 import com.anuj.notificationfirewall.domain.wall.WallBucket
 import com.anuj.notificationfirewall.ui.permissions.PermissionStatus
 import com.anuj.notificationfirewall.ui.permissions.Permissions
+import com.anuj.notificationfirewall.work.WallWorkScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -182,6 +183,9 @@ class SettingsViewModel @Inject constructor(
     fun setDigestTimeMinuteOfDay(minuteOfDay: Int) {
         settings.digestTimeMinuteOfDay = minuteOfDay
         _ui.value = _ui.value.copy(digestTimeMinuteOfDay = settings.digestTimeMinuteOfDay)
+        // UPDATE-policy reschedule (see DigestScheduler) so moving the slider
+        // actually moves when the digest fires, not just the stored setting.
+        WallWorkScheduler.scheduleDigest(context, settings.digestTimeMinuteOfDay)
     }
 
     fun setBreakGlassDurationMinutes(minutes: Int) {

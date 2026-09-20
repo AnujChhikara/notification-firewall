@@ -9,10 +9,13 @@ import androidx.work.WorkManager
 import java.util.concurrent.TimeUnit
 
 /**
- * Registers the wall's two background jobs. Idempotent — safe to call on
+ * Registers the wall's background jobs. Idempotent — safe to call on
  * every app start. This is the single owner of [MaintenanceWorker]'s
  * schedule; [MaintenanceWorker] itself no longer exposes a `schedule()`
- * entry point, so there is exactly one unique work name for it.
+ * entry point, so there is exactly one unique work name for it. It is also
+ * the sole caller of [DigestScheduler] — nothing else in the app should
+ * enqueue [DigestWorker] directly, so there is exactly one place deciding
+ * when the daily digest runs.
  */
 object WallWorkScheduler {
 
@@ -68,5 +71,17 @@ object WallWorkScheduler {
             ExistingPeriodicWorkPolicy.UPDATE,
             PeriodicWorkRequestBuilder<MaintenanceWorker>(15, TimeUnit.MINUTES).build(),
         )
+    }
+
+    /**
+     * Schedules (or reschedules, on a settings change) the daily digest at
+     * [digestMinuteOfDay]. Called both at app start (with whatever
+     * `WallSettings.digestTimeMinuteOfDay` currently holds) and again by
+     * Settings whenever the user moves the time — [DigestScheduler] uses
+     * `UPDATE`, so the second call actually takes effect instead of being
+     * ignored by a stale `KEEP`d schedule.
+     */
+    fun scheduleDigest(context: Context, digestMinuteOfDay: Int) {
+        DigestScheduler(context).scheduleDaily(digestMinuteOfDay)
     }
 }

@@ -25,6 +25,9 @@ class OpenAiClient(
     private val apiKey: String,
     private val http: OkHttpClient
 ) {
+    /** False when no key is configured -- callers that require one should degrade, not throw. */
+    val hasApiKey: Boolean get() = apiKey.isNotBlank()
+
     suspend fun chat(
         model: String,
         systemPrompt: String,

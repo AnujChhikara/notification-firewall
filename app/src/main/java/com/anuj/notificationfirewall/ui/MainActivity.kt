@@ -87,6 +87,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        val openInbox = intent?.getBooleanExtra(EXTRA_OPEN_INBOX, false) ?: false
         setContent {
             val themeViewModel: ThemeViewModel = hiltViewModel()
             val mode by themeViewModel.mode.collectAsStateWithLifecycle()
@@ -104,24 +105,34 @@ class MainActivity : ComponentActivity() {
                     enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
                 }
                 Surface(Modifier.fillMaxSize(), color = colors.background) {
-                    NfApp(themeViewModel = themeViewModel)
+                    NfApp(themeViewModel = themeViewModel, openInbox = openInbox)
                 }
             }
         }
+    }
+
+    companion object {
+        /** Set by [com.anuj.notificationfirewall.work.DigestWorker]'s tap intent. */
+        const val EXTRA_OPEN_INBOX = "open_inbox"
     }
 }
 
 @Composable
 private fun NfApp(
     themeViewModel: ThemeViewModel,
+    openInbox: Boolean = false,
     mainViewModel: MainViewModel = hiltViewModel(),
 ) {
     val nav = rememberNavController()
     val currentRoute by nav.currentBackStackEntryAsState()
     val route = currentRoute?.destination?.route
+    // Onboarding still wins: a digest tap should never skip first-run setup.
+    val startDestination =
+        if (openInbox && mainViewModel.startDestination != Routes.ONBOARDING) Routes.INBOX
+        else mainViewModel.startDestination
 
     Box(Modifier.fillMaxSize()) {
-        NfNavGraph(nav, mainViewModel.startDestination, themeViewModel)
+        NfNavGraph(nav, startDestination, themeViewModel)
         if (route in Routes.primary) {
             NfBottomBar(
                 currentRoute = route,
