@@ -238,7 +238,7 @@ class BreakGlassControllerTest {
     }
 
     @Test
-    fun retryPendingExpiryFinishesTheWindowOnceTheListenerReconnects() {
+    fun reconcileFinishesAnExpiredWindowOnceTheListenerReconnects() {
         arming.arm()
         breakGlass.start()
         now = NOW + BreakGlassController.DEFAULT_DURATION_MS + 1
@@ -249,17 +249,77 @@ class BreakGlassControllerTest {
 
         // NfListenerService.onListenerConnected fires moments later.
         prefs.listenerConnected = true
-        breakGlass.retryPendingExpiry()
+        breakGlass.reconcile()
 
         assertEquals(WallState.ARMED, arming.state())
         assertNull(breakGlass.activeUntilMs())
     }
 
     @Test
-    fun retryPendingExpiryIsANoOpWhenNothingIsPending() {
+    fun reconcileIsANoOpWhenNothingIsPending() {
         // No break-glass window was ever opened -- must not spuriously arm.
-        breakGlass.retryPendingExpiry()
+        breakGlass.reconcile()
         assertEquals(WallState.DISARMED, arming.state())
+    }
+
+    // --- CRITICAL: a still-live window whose alarm is silently cancelled by
+    // the platform (force-stop, package replacement/auto-update, or
+    // SCHEDULE_EXACT_ALARM revocation) must be rescheduled, not left to pass
+    // with nothing scheduled -- the same failure as an unresolved expiry,
+    // through a different door.
+
+    @Test
+    fun reconcileReschedulesAStillLiveWindowWhoseAlarmWasCancelled() {
+        breakGlass.start()
+        val alarms = shadowOf(context.getSystemService(android.app.AlarmManager::class.java))
+        val cancelledOperation = alarms.scheduledAlarms.single().operation
+        // Simulates force-stop / package replacement / exact-alarm revocation,
+        // all of which silently cancel an app's pending alarms.
+        context.getSystemService(android.app.AlarmManager::class.java).cancel(cancelledOperation)
+        assertEquals(0, alarms.scheduledAlarms.size)
+
+        breakGlass.reconcile()
+
+        assertEquals(1, alarms.scheduledAlarms.size)
+        val alarm = alarms.scheduledAlarms.single()
+        assertEquals(NOW + BreakGlassController.DEFAULT_DURATION_MS, alarm.triggerAtTime)
+        assertEquals(
+            BreakGlassReceiver::class.java.name,
+            shadowOf(alarm.operation).savedIntent.component?.className,
+        )
+    }
+
+    @Test
+    fun reconcileDoesNotTouchAWindowThatIsNotYetDue() {
+        // Must not prematurely close or otherwise disturb a live window
+        // whose alarm is still intact.
+        breakGlass.start()
+        val until = breakGlass.activeUntilMs()
+
+        breakGlass.reconcile()
+
+        assertEquals(until, breakGlass.activeUntilMs())
+    }
+
+    // --- IMPORTANT: cancel() must not strand the wall open either if arm()
+    // refuses (listener dropped, or policy access revoked, in the gap
+    // between the hero rendering and the tap).
+
+    @Test
+    fun cancelSchedulesARetryInsteadOfStrandingTheWallOpenIfArmFails() {
+        arming.arm()
+        breakGlass.start()
+        prefs.listenerConnected = false
+
+        breakGlass.cancel()
+
+        assertEquals(WallState.BLOCKED_NO_LISTENER, arming.state())
+        assertNull(breakGlass.activeUntilMs())
+        val alarms = shadowOf(context.getSystemService(android.app.AlarmManager::class.java))
+        assertTrue(
+            "a refused re-arm on cancel must still leave something scheduled to finish the job",
+            alarms.scheduledAlarms.isNotEmpty(),
+        )
     }
 
     // --- IMPORTANT: activeUntilMs() must catch the user turning DND on

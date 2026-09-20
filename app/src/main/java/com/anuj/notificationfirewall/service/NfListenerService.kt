@@ -71,9 +71,11 @@ class NfListenerService : NotificationListenerService() {
         // At that moment this listener has not rebound yet, so arm() refuses
         // with BLOCKED_NO_LISTENER and BreakGlassController schedules a retry
         // alarm; reconnecting here is the fast path to the same outcome,
-        // rather than waiting the retry delay out. No-op if there is nothing
-        // pending.
-        breakGlassController.retryPendingExpiry()
+        // rather than waiting the retry delay out. reconcile() also catches a
+        // still-live window whose alarm was silently cancelled (force-stop,
+        // package replacement, exact-alarm revocation). No-op if there is
+        // nothing to reconcile.
+        breakGlassController.reconcile()
     }
 
     override fun onListenerDisconnected() {

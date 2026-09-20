@@ -14,6 +14,7 @@ import com.anuj.notificationfirewall.data.prefs.SecurePrefs
 import com.anuj.notificationfirewall.data.prefs.WallSettings
 import com.anuj.notificationfirewall.domain.wall.VerdictCache
 import com.anuj.notificationfirewall.service.ArmingController
+import com.anuj.notificationfirewall.service.BreakGlassController
 import com.anuj.notificationfirewall.service.DndController
 import com.anuj.notificationfirewall.service.HealthMonitor
 import com.anuj.notificationfirewall.service.KeepAliveService
@@ -21,6 +22,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -72,6 +74,7 @@ class MaintenanceWorkerTest {
                 db.notificationDao(),
                 VerdictCache(db.verdictCacheDao()),
                 WallSettings(context.getSharedPreferences("test-maintenance-settings", Context.MODE_PRIVATE)),
+                BreakGlassController(appContext, arming, prefs),
             )
         }
         return TestListenableWorkerBuilder<MaintenanceWorker>(context)
@@ -102,6 +105,32 @@ class MaintenanceWorkerTest {
         assertNull(
             "a disarmed wall must not also request a start",
             shadowOf(context as ContextWrapper).nextStartedService,
+        )
+    }
+
+    @Test
+    fun reconcilesAStillLiveBreakGlassWindowWhoseAlarmWasCancelled() = runTest {
+        // This is the backstop path for BreakGlassController.reconcile():
+        // the fast path is NfListenerService.onListenerConnected(), but if
+        // the listener never reconnects (or the alarm is cancelled while it
+        // was already connected -- force-stop, package replacement, an
+        // exact-alarm grant revocation), this periodic run is the only thing
+        // left that can put the alarm back before the deadline passes.
+        val breakGlass = BreakGlassController(context, arming, prefs)
+        arming.arm()
+        breakGlass.start()
+
+        val alarms = shadowOf(context.getSystemService(android.app.AlarmManager::class.java))
+        val cancelledOperation = alarms.scheduledAlarms.single().operation
+        context.getSystemService(android.app.AlarmManager::class.java).cancel(cancelledOperation)
+        assertEquals(0, alarms.scheduledAlarms.size)
+
+        buildWorker().doWork()
+
+        assertEquals(
+            "the worker must reschedule the alarm a force-stop/update/revocation silently cancelled",
+            1,
+            alarms.scheduledAlarms.size,
         )
     }
 }

@@ -62,8 +62,16 @@ private const val SLOW_RETRY_DELAY_MS = 15 * 60_000L
  * erasing the deadline anyway would stand the wall open indefinitely with no
  * alarm left to retry: the exact failure this feature exists to prevent, just
  * moved to the exit instead of the entry. [finishExpiry] instead schedules a
- * retry, and [retryPendingExpiry] gives the listener's own reconnection a
- * faster path to the same outcome.
+ * retry, and [reconcile] gives the listener's own reconnection (and
+ * [com.anuj.notificationfirewall.work.MaintenanceWorker]'s periodic run) a
+ * faster or backstop path to the same outcome. [reconcile] also re-schedules
+ * a still-*live* window's alarm unconditionally: Android silently cancels an
+ * app's pending alarms on force-stop, on package replacement (a Play
+ * auto-update), and when the SCHEDULE_EXACT_ALARM grant is revoked, and
+ * without this call the only things that ever schedule an alarm for a live
+ * window are [start] and [restoreAfterBoot] -- neither of which runs again
+ * before the deadline. That is byte-for-byte the same failure as an
+ * unresolved expiry, just entered through a different door.
  *
  * `dndSetByApp` bookkeeping: [openFilter] clears it (without touching the
  * saved original-policy fields) whenever it was true, precisely so that a
@@ -107,11 +115,23 @@ class BreakGlassController(
         Log.i(TAG, "Break-glass active until $until")
     }
 
-    /** User-initiated early close: clear the window and re-arm right away. */
+    /**
+     * User-initiated early close: try to re-arm right away. Routed through
+     * the same [finishExpiry] result-check as a natural expiry -- if `arm()`
+     * refuses (the listener dropped, or policy access was revoked, in the
+     * gap between the hero rendering and the tap), this must not clear the
+     * deadline and cancel the alarm anyway: that would strand the wall open
+     * with nothing left to finish the job, the same failure Critical 1
+     * described. The pending alarm is cancelled unconditionally first (the
+     * user asked to close *now*, not wait for the original deadline), and
+     * the deadline is marked as already-due so [finishExpiry] either clears
+     * it (success) or schedules a fresh retry from now (refusal).
+     */
     fun cancel() {
-        securePrefs.breakGlassUntilMs = 0L
         alarmManager()?.cancel(pendingIntent())
-        arming.arm()
+        val requestedAt = clock()
+        securePrefs.breakGlassUntilMs = requestedAt
+        finishExpiry(requestedAt)
     }
 
     /**
@@ -155,16 +175,34 @@ class BreakGlassController(
     }
 
     /**
-     * Called from [NfListenerService.onListenerConnected]. The most likely
-     * reason an expiry could not complete is that the listener had not
-     * rebound yet after a cold start, so the moment it reconnects is the
-     * natural, fast trigger to finish what the alarm started -- rather than
-     * waiting out the retry alarm's delay. No-op if there is no pending
-     * (already-expired-but-unresolved) window.
+     * Called from [NfListenerService.onListenerConnected] (fast path: the
+     * listener reconnecting is the most common reason an expiry could not
+     * complete) and from [com.anuj.notificationfirewall.work.MaintenanceWorker]'s
+     * periodic 15-minute run (backstop: covers a listener that never
+     * reconnects on its own, or an alarm silently cancelled while the
+     * listener was already connected). No-op if there is no window recorded
+     * at all.
+     *
+     * Two things to reconcile, not just one:
+     * - An expired-but-unresolved window is finished the same way
+     *   [handleExpiryAlarm] would.
+     * - A still-live window's alarm is re-scheduled unconditionally.
+     *   Force-stop, package replacement (a Play auto-update), and
+     *   SCHEDULE_EXACT_ALARM revocation all silently cancel an app's pending
+     *   alarms; [schedule] targets the same [PendingIntent] (`FLAG_UPDATE_CURRENT`)
+     *   every time, so re-scheduling an alarm that is still there is a cheap,
+     *   idempotent no-op, while re-scheduling one that was cancelled out from
+     *   under the window is the only thing standing between that and a
+     *   deadline that passes with nothing left to close it.
      */
-    fun retryPendingExpiry() {
+    fun reconcile() {
         val until = securePrefs.breakGlassUntilMs
-        if (until != 0L && until <= clock()) finishExpiry(until)
+        if (until == 0L) return
+        if (until <= clock()) {
+            finishExpiry(until)
+        } else {
+            schedule(until)
+        }
     }
 
     /**
@@ -216,11 +254,21 @@ class BreakGlassController(
      * Returns whether the filter actually reads ALL afterwards.
      */
     private fun openFilter(nm: NotificationManager): Boolean {
+        val previousDndSetByApp = securePrefs.dndSetByApp
         securePrefs.dndSetByApp = false
         val applied = runCatching {
             nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
         }.onFailure { Log.w(TAG, "Could not open the interruption filter", it) }.isSuccess
-        return applied && nm.currentInterruptionFilter == NotificationManager.INTERRUPTION_FILTER_ALL
+        val opened = applied && nm.currentInterruptionFilter == NotificationManager.INTERRUPTION_FILTER_ALL
+        if (!opened) {
+            // The write didn't take (the filter may still be the app's own
+            // PRIORITY policy): restore ownership rather than leaving it
+            // disclaimed, or the app's own toggle/disarm can no longer turn
+            // that DND off and the user is stuck using the system shade.
+            // The saved original-policy fields were never touched either way.
+            securePrefs.dndSetByApp = previousDndSetByApp
+        }
+        return opened
     }
 
     private fun schedule(until: Long) {

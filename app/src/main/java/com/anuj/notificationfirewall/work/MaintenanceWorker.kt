@@ -10,6 +10,7 @@ import com.anuj.notificationfirewall.data.db.dao.NotificationDao
 import com.anuj.notificationfirewall.data.prefs.WallSettings
 import com.anuj.notificationfirewall.domain.wall.VerdictCache
 import com.anuj.notificationfirewall.service.ArmingController
+import com.anuj.notificationfirewall.service.BreakGlassController
 import com.anuj.notificationfirewall.service.HealthMonitor
 import com.anuj.notificationfirewall.service.KeepAliveService
 import dagger.assisted.Assisted
@@ -28,8 +29,10 @@ private const val TAG = "MaintenanceWorker"
  * idempotent, not because it needs its own cadence.
  *
  * Each run: syncs the keep-alive service to the current armed state, runs the
- * health check, purges notification text past the retention window, and
- * evicts stale cache entries.
+ * health check, reconciles any pending break-glass window (the backstop for
+ * BreakGlassController.reconcile() when the listener never reconnects on its
+ * own), purges notification text past the retention window, and evicts stale
+ * cache entries.
  *
  * The keep-alive sync is symmetric — start when armed, stop when not — rather
  * than stop-only, because [ArmingController.arm]/[ArmingController.disarm]
@@ -50,11 +53,19 @@ class MaintenanceWorker @AssistedInject constructor(
     private val notificationDao: NotificationDao,
     private val verdictCache: VerdictCache,
     private val settings: WallSettings,
+    private val breakGlassController: BreakGlassController,
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
         if (armingController.isArmed()) KeepAliveService.start(appContext) else KeepAliveService.stop(appContext)
         healthMonitor.refresh()
+        // Backstop for BreakGlassController.reconcile(): the fast path is
+        // NfListenerService.onListenerConnected(), but if the listener never
+        // reconnects on its own (permanently revoked access) or an alarm was
+        // silently cancelled by the platform while the listener was already
+        // connected, this periodic 15-minute run is the only thing left that
+        // can still close (or keep alive the alarm for) an open window.
+        breakGlassController.reconcile()
 
         // 0 means never purge.
         val retentionDays = settings.textRetentionDays
