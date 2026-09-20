@@ -58,6 +58,10 @@ class WallTileService : TileService() {
         super.onStartListening()
         render()
 
+        // Defensive: onStartListening/onStopListening are documented as
+        // paired, but cancelling any prior scope here too means a stray
+        // double-start can never leave two collectors running at once.
+        scope?.cancel()
         val listeningScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         scope = listeningScope
         listeningScope.launch {
