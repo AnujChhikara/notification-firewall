@@ -21,18 +21,28 @@ private const val TAG = "BootReceiver"
  * keep-alive service, since BOOT_COMPLETED is a documented exemption from
  * Android's background foreground-service-start restrictions. Then re-run the
  * health check. WorkManager restores its own periodic jobs on its own.
+ *
+ * [BreakGlassController.restoreAfterBoot] runs first because an
+ * AlarmManager alarm does not survive a reboot: without this call, a phone
+ * that restarts mid-break-glass-window would stay wide open forever with
+ * nothing left to close it. It either re-arms immediately (window already
+ * expired while powered off) or re-schedules the alarm the reboot discarded
+ * (window still live) -- either way the ordinary reconcile below is safe to
+ * run afterwards since it only ever acts on the live system filter.
  */
 @AndroidEntryPoint
 class BootReceiver : BroadcastReceiver() {
 
     @Inject lateinit var armingController: ArmingController
     @Inject lateinit var healthMonitor: HealthMonitor
+    @Inject lateinit var breakGlassController: BreakGlassController
 
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
         val pending = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
             try {
+                breakGlassController.restoreAfterBoot()
                 armingController.onSystemDndChanged()
                 if (armingController.isArmed()) KeepAliveService.start(context)
                 healthMonitor.refresh()

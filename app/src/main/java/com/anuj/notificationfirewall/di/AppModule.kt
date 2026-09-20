@@ -27,6 +27,8 @@ import com.anuj.notificationfirewall.domain.wall.JevApi
 import com.anuj.notificationfirewall.domain.wall.OverrideStore
 import com.anuj.notificationfirewall.domain.wall.VerdictCache
 import com.anuj.notificationfirewall.domain.wall.WallPipeline
+import com.anuj.notificationfirewall.service.ArmingController
+import com.anuj.notificationfirewall.service.BreakGlassController
 import com.anuj.notificationfirewall.service.BucketExecutor
 import com.anuj.notificationfirewall.service.ChannelManager
 import dagger.Module
@@ -172,6 +174,14 @@ object AppModule {
     @Provides
     @Singleton
     fun provideOverrideStore(dao: OverrideDao): OverrideStore = OverrideStore(dao)
+
+    @Provides
+    @Singleton
+    fun provideBreakGlassController(
+        @ApplicationContext context: Context,
+        arming: ArmingController,
+        securePrefs: SecurePrefs,
+    ): BreakGlassController = BreakGlassController(context, arming, securePrefs)
 
     @Provides
     @Singleton

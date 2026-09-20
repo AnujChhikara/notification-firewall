@@ -58,6 +58,15 @@ class DndController @Inject constructor(
     }
 
     private fun saveCurrentPolicy(nm: NotificationManager) {
+        // Never clobber a policy that is already saved and not yet restored.
+        // BreakGlassController clears dndSetByApp (without touching these
+        // saved fields) while a break-glass window is open so that the
+        // eventual re-arm through apply(wantDnd = true) is not a no-op; by
+        // that point the "current" policy is the app's own call-safe policy,
+        // not the user's real original one, and saving it here would
+        // silently replace the real original with our own -- the very next
+        // genuine disarm would then "restore" the wrong policy forever after.
+        if (securePrefs.hasSavedDndPolicy) return
         val p = nm.notificationPolicy ?: return
         securePrefs.savedDndCategories = p.priorityCategories
         securePrefs.savedDndCallSenders = p.priorityCallSenders

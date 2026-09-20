@@ -122,6 +122,15 @@
             </intent-filter>
         </receiver>
 
+        <!-- Fires the exact alarm BreakGlassController schedules to close a
+             break-glass window. Delivered via an explicit PendingIntent, not
+             an implicit broadcast, so a manifest receiver works fine at
+             minSdk 26, unlike DndChangeReceiver (see its doc comment). Not
+             exported: only this app's own AlarmManager alarm should reach it. -->
+        <receiver
+            android:name=".service.BreakGlassReceiver"
+            android:exported="false" />
+
         <!-- WorkManager on-demand initialization: remove the default
              initializer so our Hilt-aware Configuration.Provider (NfApplication)
              supplies the HiltWorkerFactory every @HiltWorker needs to be

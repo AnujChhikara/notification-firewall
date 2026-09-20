@@ -19,6 +19,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,6 +39,7 @@ import com.anuj.notificationfirewall.ui.StatusDot
 import com.anuj.notificationfirewall.ui.bucketColor
 import com.anuj.notificationfirewall.ui.permissions.Permissions
 import com.anuj.notificationfirewall.ui.theme.LocalWallColors
+import kotlinx.coroutines.delay
 
 @Composable
 fun WallScreen(nav: NavHostController) {
@@ -50,24 +52,40 @@ fun WallScreen(nav: NavHostController) {
         onPauseOrDispose {}
     }
 
+    // The countdown text is derived from a fixed timestamp, so nothing else
+    // recomposes it as time passes -- tick refresh() every few seconds while
+    // a window is open, purely so "N min left" counts down and the row
+    // disappears on its own the moment the window (or the alarm's re-arm)
+    // ends.
+    LaunchedEffect(ui.breakGlassUntilMs != null) {
+        while (ui.breakGlassUntilMs != null) {
+            delay(5_000)
+            vm.refresh()
+        }
+    }
+
     NfScreen(title = "Wall") { modifier ->
         Column(
             modifier
                 .verticalScroll(rememberScrollState())
                 .padding(bottom = 24.dp),
         ) {
-            when (ui.state) {
-                WallState.ARMED, WallState.DISARMED -> {
+            val breakGlassUntilMs = ui.breakGlassUntilMs
+            when {
+                breakGlassUntilMs != null -> {
+                    BreakGlassHero(untilMs = breakGlassUntilMs, onReArmNow = vm::cancelBreakGlass)
+                }
+                ui.state == WallState.ARMED || ui.state == WallState.DISARMED -> {
                     ToggleHero(state = ui.state, onToggle = vm::toggle)
                 }
-                WallState.BLOCKED_NO_LISTENER -> {
+                ui.state == WallState.BLOCKED_NO_LISTENER -> {
                     BlockedCard(
                         message = "Notification access is off",
                         buttonLabel = "Open notification access settings",
                         onFix = { context.startActivity(Permissions.notificationAccessIntent()) },
                     )
                 }
-                WallState.BLOCKED_NO_POLICY_ACCESS -> {
+                ui.state == WallState.BLOCKED_NO_POLICY_ACCESS -> {
                     BlockedCard(
                         message = "Do Not Disturb access is off",
                         buttonLabel = "Open Do Not Disturb access settings",
@@ -79,17 +97,54 @@ fun WallScreen(nav: NavHostController) {
             Spacer(Modifier.height(20.dp))
             CountersRow(ui.counts)
 
-            Spacer(Modifier.height(20.dp))
-            NfButton(
-                text = "Let everything through for 1 hour",
-                onClick = {},
-                enabled = false,
-                primary = false,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            if (breakGlassUntilMs == null) {
+                Spacer(Modifier.height(20.dp))
+                NfButton(
+                    text = "Let everything through for 1 hour",
+                    onClick = vm::breakGlass,
+                    enabled = ui.state == WallState.ARMED || ui.state == WallState.DISARMED,
+                    primary = false,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
 
             // Digest card lands in Task 10.
         }
+    }
+}
+
+/** Minutes remaining, rounded up so the row never shows "0 min left". */
+private fun minutesLeft(untilMs: Long, nowMs: Long = System.currentTimeMillis()): Int =
+    ((untilMs - nowMs).coerceAtLeast(0) + 59_999L).let { (it / 60_000L).toInt() }
+
+@Composable
+private fun BreakGlassHero(untilMs: Long, onReArmNow: () -> Unit) {
+    val c = LocalWallColors.current
+    val shape = RoundedCornerShape(24.dp)
+    val minutes = minutesLeft(untilMs)
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(c.surface)
+            .border(2.dp, c.border, shape)
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            "Everything is getting through · $minutes min left",
+            style = MaterialTheme.typography.titleMedium,
+            color = c.title,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Break-glass is open. The wall re-arms itself automatically.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = c.textMuted,
+        )
+        Spacer(Modifier.height(16.dp))
+        NfButton(text = "Re-arm now", onClick = onReArmNow, modifier = Modifier.fillMaxWidth())
     }
 }
 

@@ -78,6 +78,11 @@ class SecurePrefs(private val prefs: SharedPreferences) {
         get() = prefs.getBoolean(KEY_HAS_SEEN_WELCOME, false)
         set(value) = prefs.edit { putBoolean(KEY_HAS_SEEN_WELCOME, value) }
 
+    /** Epoch ms at which break-glass expires and the wall re-arms. 0 when inactive. */
+    var breakGlassUntilMs: Long
+        get() = prefs.getLong(KEY_BREAK_GLASS_UNTIL, 0L)
+        set(value) = prefs.edit { putLong(KEY_BREAK_GLASS_UNTIL, value) }
+
     private companion object {
         const val KEY_OPENAI_API_KEY = "openai_api_key"
         const val KEY_DND_SET_BY_APP = "dnd_set_by_app"
@@ -89,5 +94,6 @@ class SecurePrefs(private val prefs: SharedPreferences) {
         const val KEY_LISTENER_CONNECTED = "listener_connected"
         const val KEY_EVER_CONNECTED = "ever_connected"
         const val KEY_HAS_SEEN_WELCOME = "has_seen_welcome"
+        const val KEY_BREAK_GLASS_UNTIL = "break_glass_until_ms"
     }
 }

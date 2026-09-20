@@ -6,7 +6,9 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.anuj.notificationfirewall.data.db.NfDatabase
 import com.anuj.notificationfirewall.data.prefs.SecurePrefs
+import com.anuj.notificationfirewall.data.prefs.WallSettings
 import com.anuj.notificationfirewall.service.ArmingController
+import com.anuj.notificationfirewall.service.BreakGlassController
 import com.anuj.notificationfirewall.service.DndController
 import com.anuj.notificationfirewall.service.WallState
 import kotlinx.coroutines.test.runTest
@@ -38,7 +40,9 @@ class WallViewModelTest {
         prefs = SecurePrefs(context.getSharedPreferences("test-wall-vm", Context.MODE_PRIVATE))
         prefs.listenerConnected = true
         arming = ArmingController(context, DndController(context, prefs), prefs)
-        vm = WallViewModel(arming, db.notificationDao())
+        val breakGlass = BreakGlassController(context, arming, prefs)
+        val wallSettings = WallSettings(context.getSharedPreferences("test-wall-settings-vm", Context.MODE_PRIVATE))
+        vm = WallViewModel(arming, db.notificationDao(), breakGlass, wallSettings)
     }
 
     @After
@@ -103,5 +107,24 @@ class WallViewModelTest {
             WallState.BLOCKED_NO_LISTENER,
             vm.ui.value.state,
         )
+    }
+
+    @Test
+    fun breakGlassOpensTheWallAndPopulatesTheCountdown() = runTest {
+        vm.toggle()
+        vm.breakGlass()
+
+        assertEquals(WallState.DISARMED, vm.ui.value.state)
+        assertEquals(true, vm.ui.value.breakGlassUntilMs != null)
+    }
+
+    @Test
+    fun cancelBreakGlassReArmsAndClearsTheCountdown() = runTest {
+        vm.toggle()
+        vm.breakGlass()
+        vm.cancelBreakGlass()
+
+        assertEquals(WallState.ARMED, vm.ui.value.state)
+        assertEquals(null, vm.ui.value.breakGlassUntilMs)
     }
 }
