@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.anuj.notificationfirewall.ai.DigestStore
 import com.anuj.notificationfirewall.data.db.OverrideEntity
 import com.anuj.notificationfirewall.data.db.SenderBiasEntity
 import com.anuj.notificationfirewall.data.db.dao.NotificationDao
@@ -107,6 +108,7 @@ class SettingsViewModel @Inject constructor(
     private val bias: BiasStore,
     private val verdictCache: VerdictCache,
     private val notificationDao: NotificationDao,
+    private val digestStore: DigestStore,
 ) : ViewModel() {
 
     private val historyExporter = HistoryExporter(notificationDao)
@@ -233,11 +235,19 @@ class SettingsViewModel @Inject constructor(
 
     suspend fun exportJson(includeContent: Boolean): String = historyExporter.toJson(includeContent)
 
-    /** Deletes the entire notification history. Irreversible; confirmed by the
-     *  caller (a typed confirmation) before this is invoked. */
+    /**
+     * Deletes the entire notification history. Irreversible; confirmed by
+     * the caller (a typed confirmation) before this is invoked.
+     *
+     * Also clears the persisted digest ([DigestStore]): it can carry
+     * sender names/titles from rows this just deleted (see [DigestStore]'s
+     * KDoc), and "delete all history" that leaves a summary of that history
+     * visible on the Wall screen would not actually be deleting it.
+     */
     fun deleteAllHistory() {
         viewModelScope.launch {
             notificationDao.deleteAll()
+            digestStore.clear()
             refreshCounts()
         }
     }

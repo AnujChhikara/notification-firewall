@@ -116,12 +116,26 @@ class WallViewModel @Inject constructor(
      * The persisted digest, but only if it's recent enough to still read as
      * "today's/yesterday's summary" rather than stale data presented as
      * current -- see [DIGEST_CARD_MAX_AGE_DAYS].
+     *
+     * A stale digest is deleted here, not merely hidden: this is a
+     * content-bearing store (see [DigestStore]'s KDoc), and returning null
+     * "over the top of it" would leave sender names/titles sitting in
+     * [WallSettings.lastDigestJson] indefinitely with nothing else
+     * guaranteed to ever clear them if this screen is the only code path
+     * that notices staleness. `MaintenanceWorker`'s retention sweep is the
+     * other, independent path (this screen isn't always open to run this
+     * check), so the two together bound the content's lifetime instead of
+     * relying on either alone.
      */
     private fun loadDigestIfFresh(): PersistedDigest? {
         val digest = digestStore.load() ?: return null
         val todayEpochDay = LocalDate.now(ZoneId.systemDefault()).toEpochDay()
         val ageDays = todayEpochDay - digest.dateEpochDay
-        return digest.takeIf { ageDays in 0..DIGEST_CARD_MAX_AGE_DAYS }
+        if (ageDays !in 0..DIGEST_CARD_MAX_AGE_DAYS) {
+            digestStore.clear()
+            return null
+        }
+        return digest
     }
 
     private suspend fun loadCounts() {

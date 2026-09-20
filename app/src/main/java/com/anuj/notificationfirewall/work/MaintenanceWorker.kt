@@ -6,6 +6,7 @@ import android.util.Log
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.anuj.notificationfirewall.ai.DigestStore
 import com.anuj.notificationfirewall.data.db.dao.NotificationDao
 import com.anuj.notificationfirewall.data.prefs.WallSettings
 import com.anuj.notificationfirewall.domain.wall.VerdictCache
@@ -31,8 +32,9 @@ private const val TAG = "MaintenanceWorker"
  * Each run: syncs the keep-alive service to the current armed state, runs the
  * health check, reconciles any pending break-glass window (the backstop for
  * BreakGlassController.reconcile() when the listener never reconnects on its
- * own), purges notification text past the retention window, and evicts stale
- * cache entries.
+ * own), purges notification text past the retention window (and ages out the
+ * persisted digest -- see [DigestStore] -- on that same cutoff), and evicts
+ * stale cache entries.
  *
  * The keep-alive sync is symmetric — start when armed, stop when not — rather
  * than stop-only, because [ArmingController.arm]/[ArmingController.disarm]
@@ -54,6 +56,7 @@ class MaintenanceWorker @AssistedInject constructor(
     private val verdictCache: VerdictCache,
     private val settings: WallSettings,
     private val breakGlassController: BreakGlassController,
+    private val digestStore: DigestStore,
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
@@ -74,6 +77,12 @@ class MaintenanceWorker @AssistedInject constructor(
             val cutoff = now - retentionDays * 24L * 60 * 60 * 1000
             val purged = notificationDao.purgeTextBefore(cutoff, now)
             Log.i(TAG, "Purged text from $purged notification records")
+
+            // The persisted digest (Wall screen card) is a second, separate
+            // place a purged record's title/sender can otherwise linger --
+            // see DigestStore's KDoc. Age it out on the same cutoff so it
+            // never outlives the user's own retention setting.
+            digestStore.purgeIfOlderThan(cutoff)
         }
         val evicted = verdictCache.evictStale(maxAgeDays = 90)
         Log.i(TAG, "Evicted $evicted stale cache entries")

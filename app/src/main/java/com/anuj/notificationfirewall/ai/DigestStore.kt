@@ -3,6 +3,8 @@ package com.anuj.notificationfirewall.ai
 import com.anuj.notificationfirewall.data.prefs.WallSettings
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.time.LocalDate
+import java.time.ZoneId
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -36,7 +38,23 @@ data class PersistedDigest(
     val worthALook: List<String> = emptyList(),
 )
 
-/** Reads/writes [WallSettings.lastDigestJson] as a typed [PersistedDigest]. */
+/**
+ * Reads/writes [WallSettings.lastDigestJson] as a typed [PersistedDigest].
+ *
+ * This is a content-bearing store -- [PersistedDigest.worthALook] can carry
+ * real sender names and title text for any record that had not yet been
+ * purged when the digest was built (see [DigestBuilder.renderWorthALookLine]
+ * for the purge guard applied at build time; it protects records already
+ * purged BEFORE the digest was built, not ones purged after). Nothing about
+ * writing a new digest ever removes an old one on its own except being
+ * overwritten by the next successful [save] -- so two things call [clear]
+ * explicitly instead of relying on that: retention's periodic sweep (see
+ * [purgeIfOlderThan], called from `MaintenanceWorker`) and "Delete all
+ * history" (`SettingsViewModel.deleteAllHistory`). Without those, a digest's
+ * content could outlive both the notification rows it was built from and
+ * the user's own retention setting, bounded only by "the worker happens to
+ * run again" -- not a real guarantee.
+ */
 @Singleton
 class DigestStore @Inject constructor(
     private val settings: WallSettings,
@@ -50,4 +68,30 @@ class DigestStore @Inject constructor(
         settings.lastDigestJson?.let {
             runCatching { Json.decodeFromString(PersistedDigest.serializer(), it) }.getOrNull()
         }
+
+    /** Removes the stored digest outright. */
+    fun clear() {
+        settings.lastDigestJson = null
+    }
+
+    /**
+     * Clears the stored digest if it predates [cutoffMs] -- the same cutoff
+     * `MaintenanceWorker` passes to `NotificationDao.purgeTextBefore` -- so a
+     * persisted digest ages out on the same terms as the notification rows
+     * it summarises, rather than surviving indefinitely between successful
+     * [DigestWorker][com.anuj.notificationfirewall.work.DigestWorker] runs.
+     * [PersistedDigest.dateEpochDay] is treated as that day's start-of-day
+     * instant in the device's zone, which is at least as eager as the real
+     * purge (the digest's content actually describes the PRIOR day, so this
+     * errs on the side of clearing sooner, never later, than the rows it was
+     * built from).
+     */
+    fun purgeIfOlderThan(cutoffMs: Long) {
+        val digest = load() ?: return
+        val postedAtMs = LocalDate.ofEpochDay(digest.dateEpochDay)
+            .atStartOfDay(ZoneId.systemDefault())
+            .toInstant()
+            .toEpochMilli()
+        if (postedAtMs < cutoffMs) clear()
+    }
 }

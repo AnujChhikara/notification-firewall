@@ -85,6 +85,26 @@ class WallViewModelTest {
         )
     }
 
+    /**
+     * DigestStore is content-bearing (worthALook can carry sender
+     * names/titles). Hiding a stale digest from the UI state is not enough
+     * -- the raw JSON must actually be deleted from WallSettings, or it sits
+     * on disk indefinitely with only this screen's age check (which does not
+     * run unless the screen is opened) ever noticing.
+     */
+    @Test
+    fun aStaleDigestIsActuallyDeletedFromTheStoreNotJustHiddenFromTheUi() = runTest {
+        val longAgo = LocalDate.now(ZoneId.systemDefault()).toEpochDay() - 10
+        digestStore.save(digest(longAgo))
+
+        vm.refresh()
+
+        assertNull(
+            "a stale digest must be cleared from the store, not merely filtered out of ui.value",
+            digestStore.load(),
+        )
+    }
+
     @Test
     fun noDigestYetMeansNoCard() = runTest {
         vm.refresh()

@@ -3,6 +3,8 @@ package com.anuj.notificationfirewall.ui.settings
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import com.anuj.notificationfirewall.ai.DigestStore
+import com.anuj.notificationfirewall.ai.PersistedDigest
 import com.anuj.notificationfirewall.data.db.NfDatabase
 import com.anuj.notificationfirewall.data.db.NotificationRecordEntity
 import com.anuj.notificationfirewall.data.db.SenderBiasEntity
@@ -22,6 +24,7 @@ import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -41,6 +44,7 @@ class SettingsViewModelTest {
     private lateinit var context: Context
     private lateinit var db: NfDatabase
     private lateinit var settings: WallSettings
+    private lateinit var digestStore: DigestStore
     private lateinit var vm: SettingsViewModel
 
     @Before
@@ -54,6 +58,7 @@ class SettingsViewModelTest {
             .setTransactionExecutor(sameThread)
             .build()
         settings = WallSettings(context.getSharedPreferences("test-settings-vm", Context.MODE_PRIVATE))
+        digestStore = DigestStore(settings)
         vm = SettingsViewModel(
             context = context,
             settings = settings,
@@ -61,6 +66,7 @@ class SettingsViewModelTest {
             bias = BiasStore(db.senderBiasDao()) { 1_700_000_000_000L },
             verdictCache = VerdictCache(db.verdictCacheDao()) { 1_700_000_000_000L },
             notificationDao = db.notificationDao(),
+            digestStore = digestStore,
         )
     }
 
@@ -143,6 +149,32 @@ class SettingsViewModelTest {
 
         assertEquals(0, vm.ui.value.historyCount)
         assertEquals(0, db.notificationDao().totalCount())
+    }
+
+    /**
+     * DigestStore is a content-bearing store (sender names/titles can be in
+     * worthALook) that summarises the very rows this wipes. "Delete all
+     * history" that left a summary of that history sitting on the Wall
+     * screen would not actually be deleting it.
+     */
+    @Test
+    fun deleteAllHistoryAlsoClearsThePersistedDigest() = runTest {
+        digestStore.save(
+            PersistedDigest(
+                dateEpochDay = 19_000,
+                headline = "Yesterday: 5 silenced, 1 let through.",
+                rang = 1, silenced = 5, dropped = 0,
+                topOffenderLabel = "Myntra", topOffenderCount = 5,
+                worthALook = listOf("Landlord: rent due"),
+            ),
+        )
+
+        vm.deleteAllHistory()
+
+        assertNull(
+            "deleting all history must not leave a digest summarising it behind",
+            digestStore.load(),
+        )
     }
 
     @Test

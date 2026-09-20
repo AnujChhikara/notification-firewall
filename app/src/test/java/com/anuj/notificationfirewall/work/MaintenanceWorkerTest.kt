@@ -9,6 +9,8 @@ import androidx.work.ListenableWorker
 import androidx.work.WorkerFactory
 import androidx.work.WorkerParameters
 import androidx.work.testing.TestListenableWorkerBuilder
+import com.anuj.notificationfirewall.ai.DigestStore
+import com.anuj.notificationfirewall.ai.PersistedDigest
 import com.anuj.notificationfirewall.data.db.NfDatabase
 import com.anuj.notificationfirewall.data.prefs.SecurePrefs
 import com.anuj.notificationfirewall.data.prefs.WallSettings
@@ -21,6 +23,8 @@ import com.anuj.notificationfirewall.service.KeepAliveService
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -28,6 +32,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
+import java.time.LocalDate
+import java.time.ZoneId
 
 /**
  * Covers the keep-alive self-healing symmetry: [MaintenanceWorker] must
@@ -43,6 +49,8 @@ class MaintenanceWorkerTest {
     private lateinit var db: NfDatabase
     private lateinit var prefs: SecurePrefs
     private lateinit var arming: ArmingController
+    private lateinit var wallSettings: WallSettings
+    private lateinit var digestStore: DigestStore
 
     @Before
     fun setUp() {
@@ -55,6 +63,8 @@ class MaintenanceWorkerTest {
         db = Room.inMemoryDatabaseBuilder(context, NfDatabase::class.java)
             .allowMainThreadQueries()
             .build()
+        wallSettings = WallSettings(context.getSharedPreferences("test-maintenance-settings", Context.MODE_PRIVATE))
+        digestStore = DigestStore(wallSettings)
     }
 
     @After
@@ -73,14 +83,23 @@ class MaintenanceWorkerTest {
                 HealthMonitor(appContext, prefs),
                 db.notificationDao(),
                 VerdictCache(db.verdictCacheDao()),
-                WallSettings(context.getSharedPreferences("test-maintenance-settings", Context.MODE_PRIVATE)),
+                wallSettings,
                 BreakGlassController(appContext, arming, prefs),
+                digestStore,
             )
         }
         return TestListenableWorkerBuilder<MaintenanceWorker>(context)
             .setWorkerFactory(factory)
             .build()
     }
+
+    private fun digest(dateEpochDay: Long, worthALook: List<String> = emptyList()) = PersistedDigest(
+        dateEpochDay = dateEpochDay,
+        headline = "Yesterday: 5 silenced, 1 let through.",
+        rang = 1, silenced = 5, dropped = 0,
+        topOffenderLabel = "Myntra", topOffenderCount = 5,
+        worthALook = worthALook,
+    )
 
     @Test
     fun armedRequestsKeepAliveStart() = runTest {
@@ -131,6 +150,76 @@ class MaintenanceWorkerTest {
             "the worker must reschedule the alarm a force-stop/update/revocation silently cancelled",
             1,
             alarms.scheduledAlarms.size,
+        )
+    }
+
+    /**
+     * The persisted digest (Wall screen card) is a content-bearing store
+     * (worthALook can carry sender names/titles -- see DigestStore's KDoc)
+     * that nothing else was guaranteed to ever clear. It must age out on the
+     * same retention terms as the notification rows it summarises.
+     */
+    @Test
+    fun retentionSweepClearsAPersistedDigestOlderThanTheRetentionWindow() = runTest {
+        wallSettings.textRetentionDays = 1
+        digestStore.save(digest(dateEpochDay = LocalDate.now(ZoneId.systemDefault()).minusDays(5).toEpochDay()))
+
+        buildWorker().doWork()
+
+        assertNull(
+            "a digest older than the retention window must be cleared, not merely stale",
+            digestStore.load(),
+        )
+    }
+
+    @Test
+    fun retentionSweepKeepsAPersistedDigestWithinTheRetentionWindow() = runTest {
+        wallSettings.textRetentionDays = 30
+        digestStore.save(digest(dateEpochDay = LocalDate.now(ZoneId.systemDefault()).toEpochDay()))
+
+        buildWorker().doWork()
+
+        assertNotNull(
+            "a digest still inside the retention window must not be wiped by an unrelated sweep",
+            digestStore.load(),
+        )
+    }
+
+    @Test
+    fun retentionOfZeroNeverPurgesTheDigestEither() = runTest {
+        // 0 means "never purge" for notification text; the digest must honour
+        // the same "never" rather than silently applying its own cutoff.
+        wallSettings.textRetentionDays = 0
+        digestStore.save(digest(dateEpochDay = LocalDate.now(ZoneId.systemDefault()).minusDays(400).toEpochDay()))
+
+        buildWorker().doWork()
+
+        assertNotNull(digestStore.load())
+    }
+
+    /**
+     * The end-to-end promise: a record's content that was baked into a
+     * digest, then purged by retention, must not remain readable from the
+     * digest store afterward -- the same guarantee retention already makes
+     * for the `notifications` table itself.
+     */
+    @Test
+    fun aDigestBuiltFromAContentBearingRecordDoesNotSurviveThatRecordsRetentionPurge() = runTest {
+        wallSettings.textRetentionDays = 1
+        digestStore.save(
+            digest(
+                dateEpochDay = LocalDate.now(ZoneId.systemDefault()).minusDays(5).toEpochDay(),
+                worthALook = listOf("Landlord: rent due"),
+            ),
+        )
+
+        buildWorker().doWork()
+
+        val reloaded = digestStore.load()
+        assertNull(reloaded)
+        assertFalse(
+            "the purged record's content must not be readable from the store by any path",
+            (reloaded?.worthALook ?: emptyList()).any { it.contains("Landlord") },
         )
     }
 }
