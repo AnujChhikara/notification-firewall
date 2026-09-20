@@ -30,7 +30,6 @@ import java.util.Locale
 import com.anuj.notificationfirewall.ai.jev.JevClient
 import com.anuj.notificationfirewall.data.prefs.SecurePrefs
 import com.anuj.notificationfirewall.data.prefs.WallSettings
-import com.anuj.notificationfirewall.domain.wall.JevException
 import com.anuj.notificationfirewall.domain.wall.JevState
 import com.anuj.notificationfirewall.ui.NfButton
 import com.anuj.notificationfirewall.ui.NfCard
@@ -40,6 +39,7 @@ import com.anuj.notificationfirewall.ui.theme.LocalWallColors
 import com.anuj.notificationfirewall.ui.theme.WallColors
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import java.time.LocalTime
@@ -49,11 +49,39 @@ import javax.inject.Inject
 private const val JEV_BASE_URL = "https://api.typesafe.ai/"
 private val TEST_TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
+/** Converts every ordinary connectivity/client failure into UI state while
+ * preserving structured-concurrency cancellation. */
+class JevKeyTester internal constructor(
+    private val classify: suspend (String) -> Float,
+) {
+    suspend fun test(key: String): Result<Float> = try {
+        Result.success(classify(key.trim()))
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+}
+
 @HiltViewModel
 class KeysViewModel @Inject constructor(
     private val wallSettings: WallSettings,
     private val securePrefs: SecurePrefs,
 ) : ViewModel() {
+
+    private val jevKeyTester = JevKeyTester { key ->
+        val client = JevClient(JEV_BASE_URL.toHttpUrl(), key, OkHttpClient())
+        val state = JevState(
+            app = "Notification Wall",
+            channel = "connectivity-test",
+            title = "Test notification",
+            text = "This is a connectivity test from the notification wall app.",
+            arrivedAtLocal = LocalTime.now().format(TEST_TIME_FORMAT),
+            isReplyCapable = false,
+            isFromContact = false,
+        )
+        client.classify(state).importance
+    }
 
     val storedJevKey: String? get() = wallSettings.jevKey
     val storedOpenAiKey: String? get() = securePrefs.openAiKey
@@ -83,21 +111,7 @@ class KeysViewModel @Inject constructor(
     suspend fun testJevKey(key: String): Result<Float> {
         val trimmed = key.trim()
         if (trimmed.isBlank()) return Result.failure(IllegalArgumentException("Enter a key first"))
-        val client = JevClient(JEV_BASE_URL.toHttpUrl(), trimmed, OkHttpClient())
-        val state = JevState(
-            app = "Notification Wall",
-            channel = "connectivity-test",
-            title = "Test notification",
-            text = "This is a connectivity test from the notification wall app.",
-            arrivedAtLocal = LocalTime.now().format(TEST_TIME_FORMAT),
-            isReplyCapable = false,
-            isFromContact = false,
-        )
-        return try {
-            Result.success(client.classify(state).importance)
-        } catch (e: JevException) {
-            Result.failure(e)
-        }
+        return jevKeyTester.test(trimmed)
     }
 }
 
@@ -209,12 +223,15 @@ fun KeysScreen(nav: NavHostController, vm: KeysViewModel = hiltViewModel()) {
                                 testing = true
                                 testOutcome = null
                                 scope.launch {
-                                    val result = vm.testJevKey(keyToTest)
-                                    testing = false
-                                    testOutcome = result.fold(
-                                        onSuccess = { importance -> TestOutcome.Success(importance) },
-                                        onFailure = { e -> TestOutcome.Failure(e.message ?: "Test failed") },
-                                    )
+                                    try {
+                                        val result = vm.testJevKey(keyToTest)
+                                        testOutcome = result.fold(
+                                            onSuccess = { importance -> TestOutcome.Success(importance) },
+                                            onFailure = { e -> TestOutcome.Failure(e.message ?: "Test failed") },
+                                        )
+                                    } finally {
+                                        testing = false
+                                    }
                                 }
                             },
                         )

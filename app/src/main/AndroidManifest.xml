@@ -2,6 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Install-time capability used by Jev classification, Ask, and the
+         daily digest. Android does not show a runtime prompt for INTERNET. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!-- Required (Android 13+) to post the re-posted SILENCE / CUSTOM_SOUND
          notifications from BucketExecutor and the wake-up digest. Requested at
          runtime by onboarding; declared here so notify() calls are valid. -->
