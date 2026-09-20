@@ -9,6 +9,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -153,7 +155,14 @@ private fun NfApp(
 
 @Composable
 private fun NfNavGraph(nav: NavHostController, startDestination: String, themeViewModel: ThemeViewModel) {
-    NavHost(navController = nav, startDestination = startDestination) {
+    NavHost(
+        navController = nav,
+        startDestination = startDestination,
+        enterTransition = { EnterTransition.None },
+        exitTransition = { ExitTransition.None },
+        popEnterTransition = { EnterTransition.None },
+        popExitTransition = { ExitTransition.None },
+    ) {
         composable(Routes.ONBOARDING) { OnboardingScreen(nav) }
         composable(Routes.WALL) { WallScreen(nav) }
         composable(Routes.INBOX) { InboxScreen(nav) }
