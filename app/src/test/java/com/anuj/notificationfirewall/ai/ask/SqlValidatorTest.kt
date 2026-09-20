@@ -1017,8 +1017,9 @@ class SqlValidatorTest {
     //   1. JVM case folding. `regionMatches(ignoreCase = true)` folds via
     //      toUpperCase/toLowerCase, under which U+0131 (Turkish dotless i) and
     //      U+0130 both equal `i`. `having` and `limit` each carry an `i`.
-    //      (Brute-forcing U+0080..U+FFFF finds exactly three such collisions:
-    //      U+0130/U+0131 with `i`, U+017F with `s`, U+212A with `k`.)
+    //      (Brute-forcing U+0080..U+FFFF in both argument orders finds exactly
+    //      four such collisions: U+0130 and U+0131 with `i`, U+017F with `s`,
+    //      U+212A with `k`. There is no fifth.)
     //   2. Word boundaries. SQLite's tokeniser treats every character at or
     //      above U+0080, and `$`, as an identifier character; Java's
     //      `Char.isLetterOrDigit()` does not, so `having«` read as the stop
@@ -1062,11 +1063,18 @@ class SqlValidatorTest {
 
     @Test
     fun aDotlessILimitAliasCannotHideACommaJoin() {
-        // `limit` is the other stop word carrying an `i`. Note this one has no
-        // backstop from the LIMIT-count check: Kotlin's RegexOption.IGNORE_CASE
-        // is Pattern.CASE_INSENSITIVE *without* UNICODE_CASE (its flag value is
-        // 2), so `\blimit\b` never matches `l\u0131mit` and the statement still
-        // carries exactly one recognised LIMIT.
+        // `limit` is the other stop word carrying an `i`, and it is the one
+        // variant that was already rejected before this fix -- but by the
+        // wrong guard, which is why it is pinned here by *reason* and not
+        // merely by rejection. Kotlin's `Regex` passes IGNORE_CASE through a
+        // private `ensureUnicodeCase`, so the compiled flags are
+        // CASE_INSENSITIVE|UNICODE_CASE (`flags() == 66`, not 2 as the enum
+        // constant alone suggests). `\blimit\b` therefore *does* match
+        // `l\u0131mit`, the statement counted two LIMITs, and the LIMIT counter
+        // rejected it with "Exactly one LIMIT clause is required" while the
+        // stop-word scan sailed past the comma join. `having` has no such
+        // accidental backstop, which is what made it the exploitable one.
+        // Asserting the reason here is what keeps the two guards distinct.
         rejectedBecause(
             "SELECT locale FROM notifications l\u0131mit, android_metadata LIMIT 1",
             "Comma joins",
@@ -1146,6 +1154,29 @@ class SqlValidatorTest {
                     "HAVING c > 1 LIMIT 20",
             ),
         )
+    }
+
+    @Test
+    fun aLongerProjectionCanOnlyDissolveAStarInStatementsSqliteRejects() {
+        // The one place where treating more characters as identifier
+        // characters *loosens* rather than tightens: findTopLevelProjection
+        // misses `FROM«` as a keyword, runs on to the later real `FROM`, and
+        // returns a projection long enough that STAR_ITEM stops matching. All
+        // three of these were rejected before that change and are allowed now.
+        //
+        // Pinned deliberately as `allowed`, rather than quietly left
+        // untested, because the loosening is real and the reason it is
+        // harmless is a claim about SQLite rather than about this file:
+        // nothing but a comma may sit between a projection's `*` and the real
+        // FROM, so each of these is a syntax error and cannot execute
+        // (verified against SQLite 3.51). RawQueryDao refuses them anyway --
+        // EXPLAIN QUERY PLAN cannot prepare a statement that will not parse.
+        //
+        // If a future change makes any of these *executable*, this test
+        // failing is not the problem; it is the warning.
+        assertTrue(allowed("SELECT * FROM\u00ab x FROM notifications LIMIT 1"))
+        assertTrue(allowed("SELECT * FROM\u0024 x FROM notifications LIMIT 1"))
+        assertTrue(allowed("SELECT n.* FROM\u00ab q FROM notifications n LIMIT 1"))
     }
 
     // ── The shared paren-group walk is a cross-gate contract ─────────────

@@ -192,10 +192,35 @@ object SqlValidator {
      * identifier. So `FROM notifications having«, android_metadata` read as
      * a `having` stop word here — ending [hasCommaInAnyFromClause]'s scan and
      * hiding the comma join behind it — while SQLite read `having«` as an
-     * ordinary alias and executed the join. Counting *more* things as
-     * identifier characters can only shorten the set of keywords recognised,
-     * and every caller of [keywordAt] fails towards a rejection when a
-     * keyword is not recognised, so this direction cannot loosen the gate.
+     * ordinary alias and executed the join.
+     *
+     * Counting *more* things as identifier characters can only shorten the
+     * set of keywords recognised. For two of [keywordAt]'s three callers that
+     * is unambiguously tightening: [hasCommaInAnyFromClause] scans further and
+     * so finds commas it used to stop short of, and [parenGroupIsSubquery]
+     * returns false, which is a rejection.
+     *
+     * [findTopLevelProjection] is the exception and the claim must not be made
+     * about it. If it fails to recognise a `from` and a *later* top-level
+     * `from` exists, it returns a **longer** projection, and a longer
+     * projection can dissolve the star item so that [STAR_ITEM] no longer
+     * matches. Three statements rejected before this change are allowed after
+     * it:
+     *
+     * ```
+     * SELECT * FROM« x FROM notifications LIMIT 1
+     * SELECT * FROM$ x FROM notifications LIMIT 1
+     * SELECT n.* FROM« q FROM notifications n LIMIT 1
+     * ```
+     *
+     * The exception is harmless, and not by luck: nothing but a comma may sit
+     * between a projection's `*` and the real `FROM`, so every statement of
+     * this shape is a SQLite syntax error and cannot execute. The loosening is
+     * confined to statements that were never runnable. RawQueryDao refuses
+     * them independently in any case — its cursor-column check is the
+     * authoritative star guard, and it never gets that far because
+     * `EXPLAIN QUERY PLAN` cannot prepare a statement that will not parse.
+     * Pinned by `aLongerProjectionCanOnlyDissolveAStarInStatementsSqliteRejects`.
      */
     private fun isIdentifierChar(c: Char): Boolean =
         c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9' ||
@@ -215,9 +240,10 @@ object SqlValidator {
      * This is a fix for a real bypass, not a style preference. `lowercase()`
      * is not a case-folding normaliser, and the JVM's
      * `regionMatches(ignoreCase = true)` compares through
-     * `toUpperCase`/`toLowerCase`, under which exactly three non-ASCII
+     * `toUpperCase`/`toLowerCase`, under which exactly four non-ASCII
      * characters collide with an ASCII letter: U+0130 and U+0131 with `i`,
-     * U+017F with `s`, U+212A with `k` (brute-forced over U+0080..U+FFFF).
+     * U+017F with `s`, U+212A with `k` (brute-forced over U+0080..U+FFFF in
+     * both argument orders; there is no fifth).
      * Two of those letters appear in keywords this file matches — `having`
      * and `limit` carry `i`, `select` carries `s` — so
      * `SELECT locale FROM notifications havıng, android_metadata LIMIT 1`
@@ -238,6 +264,12 @@ object SqlValidator {
      * — lowercasing does not remove U+0131.
      */
     private fun asciiEqualsIgnoreCase(text: String, pos: Int, word: String): Boolean {
+        // Its own guard, not [keywordAt]'s. The only caller today happens to
+        // short-circuit the same length check first, but a comparison helper
+        // that indexes out of bounds for anyone who forgets is a footgun, and
+        // returning false is the right answer anyway: a region that runs off
+        // the end of the text is not the word.
+        if (pos < 0 || pos + word.length > text.length) return false
         for (k in word.indices) {
             if (asciiLower(text[pos + k]) != asciiLower(word[k])) return false
         }
