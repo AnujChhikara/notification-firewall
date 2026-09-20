@@ -13,6 +13,25 @@ private const val TAG = "BreakGlass"
 private const val REQUEST_CODE = 7701
 
 /**
+ * How soon to retry finishing an expired window when [ArmingController.arm]
+ * could not complete it (typically BLOCKED_NO_LISTENER: a cold-started
+ * process has not rebound its notification listener yet). Short, because the
+ * common case resolves in seconds; [NfListenerService.onListenerConnected]
+ * also triggers an immediate retry the moment the listener is back, so this
+ * alarm is mostly a backstop for whichever fires first.
+ */
+private const val FAST_RETRY_DELAY_MS = 30_000L
+
+/**
+ * Once an expiry has been stuck unresolved for this long, back off to a
+ * slower cadence rather than waking the device every 30s indefinitely --
+ * e.g. the user revoked notification access for good and nothing will ever
+ * un-stick it on its own.
+ */
+private const val SLOW_RETRY_AFTER_MS = 10 * 60_000L
+private const val SLOW_RETRY_DELAY_MS = 15 * 60_000L
+
+/**
  * "I'm expecting something important and I don't trust the wall right now."
  *
  * Opens the interruption filter completely for a fixed window and schedules an
@@ -29,18 +48,36 @@ private const val REQUEST_CODE = 7701
  * through". Spec §7.4 says to set the filter; setting it here, unconditionally,
  * is what actually keeps that promise.
  *
- * Re-arming (from [cancel], the boot-restore path, and [BreakGlassReceiver])
+ * Re-arming (from [cancel], the expiry path, and the boot-restore path)
  * always goes back through [ArmingController.arm], never by poking the filter
  * directly, so the exact call-safe policy (calls + repeat callers always ring)
- * is restored through the one place that owns it.
+ * is restored through the one place that owns it. Per Ruling P9, "render what
+ * arm() actually returned" is taken literally here: [finishExpiry] only clears
+ * the stored deadline once `arm()` reports ARMED. The most likely reason it
+ * would report anything else at expiry time is that the alarm woke a
+ * previously-killed process, whose notification listener has not rebound yet
+ * -- `arm()` correctly, and deliberately, refuses in that state
+ * (BLOCKED_NO_LISTENER) rather than putting the phone into DND with nothing
+ * bound to re-post anything. Treating that refusal as "close enough" and
+ * erasing the deadline anyway would stand the wall open indefinitely with no
+ * alarm left to retry: the exact failure this feature exists to prevent, just
+ * moved to the exit instead of the entry. [finishExpiry] instead schedules a
+ * retry, and [retryPendingExpiry] gives the listener's own reconnection a
+ * faster path to the same outcome.
  *
- * `dndSetByApp` bookkeeping: [start] clears it (without touching the saved
- * original-policy fields) whenever it was true, precisely so that a later
- * `arm()` is not a no-op. [DndController.apply]'s "already own it" guard is
- * keyed on `dndSetByApp`; leaving it at `true` across a break-glass window
- * would make the eventual re-arm silently do nothing — filter stuck open
- * forever even though `arm()` claims to have run. See the task-9 report for
- * the full trace of why this is safe and does not corrupt the saved policy.
+ * `dndSetByApp` bookkeeping: [openFilter] clears it (without touching the
+ * saved original-policy fields) whenever it was true, precisely so that a
+ * later `arm()` is not a no-op. [DndController.apply]'s "already own it"
+ * guard is keyed on `dndSetByApp`; leaving it at `true` across a break-glass
+ * window would make the eventual re-arm silently do nothing — filter stuck
+ * open forever even though `arm()` claims to have run. It is cleared *before*
+ * the filter write, not after: the write triggers a system broadcast that
+ * [DndChangeReceiver] can react to on another thread ([restoreAfterBoot] runs
+ * on a background dispatcher), and if it observed `dndSetByApp` still `true`
+ * with the filter already `ALL`, it would clear `hasSavedDndPolicy` too --
+ * undoing the very fix ([DndController.saveCurrentPolicy]'s guard) that keeps
+ * a break-glass round trip from corrupting the user's real saved policy. See
+ * the task-9 report for the full trace.
  */
 class BreakGlassController(
     private val context: Context,
@@ -58,9 +95,14 @@ class BreakGlassController(
             Log.w(TAG, "Cannot start break-glass without notification policy access")
             return
         }
+        if (!openFilter(nm)) {
+            // The write didn't stick (or threw): do not commit a deadline
+            // and countdown over a phone that is still actually filtering.
+            Log.w(TAG, "Could not open the interruption filter; break-glass not started")
+            return
+        }
         val until = clock() + durationMs
         securePrefs.breakGlassUntilMs = until
-        openFilter(nm)
         schedule(until)
         Log.i(TAG, "Break-glass active until $until")
     }
@@ -76,26 +118,53 @@ class BreakGlassController(
      * Expiry timestamp while a window is live, or null.
      *
      * Also treats the window as over -- and cleans up the stored deadline
-     * and the pending alarm -- the moment the wall reports genuinely ARMED,
-     * even if the timestamp has not yet passed. [start] clears
-     * `dndSetByApp` precisely so that any other caller of
-     * [ArmingController.arm] (the Quick Settings tile's onClick, for
-     * instance, which arms/disarms directly and knows nothing about
-     * break-glass) is not a no-op either -- which means the wall can end up
-     * genuinely armed again before the alarm fires. Without this check the
-     * Wall screen would keep showing "everything is getting through" long
-     * after the wall was actually filtering again: the one lie this whole
-     * feature exists to prevent, just from a different door.
+     * and the pending alarm -- the moment the live interruption filter is no
+     * longer [NotificationManager.INTERRUPTION_FILTER_ALL], even if the
+     * timestamp has not yet passed. Two different things can close the
+     * filter without going through this class: the Quick Settings tile's
+     * onClick arms/disarms [ArmingController] directly and knows nothing
+     * about break-glass, and the user can simply turn DND on themselves
+     * mid-window. Reading `arming.state()` here would miss the second case
+     * (a user-owned DND reads as DISARMED, since `dndSetByApp` is false), so
+     * this checks the live filter directly instead -- the same live-derived
+     * standard [ArmingController.state] itself is built on. Leaving a stale
+     * countdown running over a phone that is actually filtering again is the
+     * mirror image of the lie this whole feature exists to prevent.
+     *
+     * Named `activeUntilMs` (read, not `checkAndClose...`) to match the
+     * brief's pinned interface; the side effect is unusual for a getter and
+     * is documented here deliberately for that reason.
      */
     fun activeUntilMs(): Long? {
         val until = securePrefs.breakGlassUntilMs
         if (until == 0L || until <= clock()) return null
-        if (arming.state() == WallState.ARMED) {
+        val liveFilter = notificationManager()?.currentInterruptionFilter
+        if (liveFilter != null && liveFilter != NotificationManager.INTERRUPTION_FILTER_ALL) {
             securePrefs.breakGlassUntilMs = 0L
             alarmManager()?.cancel(pendingIntent())
             return null
         }
         return until
+    }
+
+    /** Called by [BreakGlassReceiver] when the scheduled (or retry) alarm fires. */
+    fun handleExpiryAlarm() {
+        val until = securePrefs.breakGlassUntilMs
+        if (until == 0L) return // already resolved by a race with another trigger
+        finishExpiry(until)
+    }
+
+    /**
+     * Called from [NfListenerService.onListenerConnected]. The most likely
+     * reason an expiry could not complete is that the listener had not
+     * rebound yet after a cold start, so the moment it reconnects is the
+     * natural, fast trigger to finish what the alarm started -- rather than
+     * waiting out the retry alarm's delay. No-op if there is no pending
+     * (already-expired-but-unresolved) window.
+     */
+    fun retryPendingExpiry() {
+        val until = securePrefs.breakGlassUntilMs
+        if (until != 0L && until <= clock()) finishExpiry(until)
     }
 
     /**
@@ -108,8 +177,7 @@ class BreakGlassController(
         if (until == 0L) return
 
         if (until <= clock()) {
-            securePrefs.breakGlassUntilMs = 0L
-            arming.arm()
+            finishExpiry(until)
         } else {
             // The window is still open. The interruption filter does not
             // survive a reboot either, so re-open it and reschedule the
@@ -121,19 +189,38 @@ class BreakGlassController(
     }
 
     /**
-     * Sets the interruption filter directly. See the class doc for why this
-     * does not go through [ArmingController.disarm] / [DndController].
+     * The one place that actually closes an expired window. Only clears the
+     * stored deadline once [ArmingController.arm] genuinely reports ARMED;
+     * see the class doc for why a refusal must not be treated as success.
      */
-    private fun openFilter(nm: NotificationManager) {
-        runCatching {
-            nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
-        }.onFailure { Log.w(TAG, "Could not open the interruption filter", it) }
-        // Release ownership so a later arm() (cancel / expiry / boot-restore)
-        // actually re-applies the call-safe policy instead of no-op'ing
-        // because DndController still believes it already owns DND. The saved
-        // original-policy fields are left untouched -- they still hold the
-        // real pre-arm policy and must survive the round trip.
+    private fun finishExpiry(originalUntil: Long) {
+        val result = arming.arm()
+        if (result == WallState.ARMED) {
+            securePrefs.breakGlassUntilMs = 0L
+            alarmManager()?.cancel(pendingIntent())
+        } else {
+            Log.w(TAG, "Could not re-arm at expiry ($result); retrying")
+            val delay = if (clock() - originalUntil < SLOW_RETRY_AFTER_MS) {
+                FAST_RETRY_DELAY_MS
+            } else {
+                SLOW_RETRY_DELAY_MS
+            }
+            schedule(clock() + delay)
+        }
+    }
+
+    /**
+     * Sets the interruption filter directly. See the class doc for why this
+     * does not go through [ArmingController.disarm] / [DndController], and
+     * for why `dndSetByApp` is released before, not after, the filter write.
+     * Returns whether the filter actually reads ALL afterwards.
+     */
+    private fun openFilter(nm: NotificationManager): Boolean {
         securePrefs.dndSetByApp = false
+        val applied = runCatching {
+            nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
+        }.onFailure { Log.w(TAG, "Could not open the interruption filter", it) }.isSuccess
+        return applied && nm.currentInterruptionFilter == NotificationManager.INTERRUPTION_FILTER_ALL
     }
 
     private fun schedule(until: Long) {
@@ -145,9 +232,12 @@ class BreakGlassController(
             if (canBeExact) {
                 alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, until, pendingIntent())
             } else {
-                // Without the exact-alarm grant the re-arm may drift by
-                // minutes. Late is acceptable; never is not.
-                alarms.set(AlarmManager.RTC_WAKEUP, until, pendingIntent())
+                // Without the exact-alarm grant the re-arm may drift, but it
+                // must still be allowed to fire during Doze: plain set() can
+                // be deferred for hours, not the minutes a comment here used
+                // to claim. setAndAllowWhileIdle() is the idle-safe
+                // equivalent of the inexact API.
+                alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, until, pendingIntent())
             }
         }.onFailure { Log.w(TAG, "Could not schedule the re-arm alarm", it) }
     }

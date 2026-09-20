@@ -43,6 +43,7 @@ class NfListenerService : NotificationListenerService() {
     @Inject lateinit var armingController: ArmingController
     @Inject lateinit var healthMonitor: HealthMonitor
     @Inject lateinit var securePrefs: com.anuj.notificationfirewall.data.prefs.SecurePrefs
+    @Inject lateinit var breakGlassController: BreakGlassController
 
     // Off-main scope for the DB + network (Jev) + PackageManager work triggered by
     // each posted notification. SupervisorJob so one failed decision never tears
@@ -65,6 +66,14 @@ class NfListenerService : NotificationListenerService() {
         // NotificationCanceller kdoc.
         bucketExecutor.canceller = NotificationCanceller { key -> cancelNotification(key) }
         scope.launch { healthMonitor.refresh() }
+        // A cold-started process is the normal way a break-glass expiry alarm
+        // is delivered (15-60 minutes after the user last touched the phone).
+        // At that moment this listener has not rebound yet, so arm() refuses
+        // with BLOCKED_NO_LISTENER and BreakGlassController schedules a retry
+        // alarm; reconnecting here is the fast path to the same outcome,
+        // rather than waiting the retry delay out. No-op if there is nothing
+        // pending.
+        breakGlassController.retryPendingExpiry()
     }
 
     override fun onListenerDisconnected() {

@@ -25,6 +25,9 @@ data class WallUiState(
     val state: WallState = WallState.DISARMED,
     val counts: TodayCounts = TodayCounts(),
     val breakGlassUntilMs: Long? = null,
+    /** Clamped 5..120; drives both the "Let everything through for N" label
+     *  and the actual duration [WallViewModel.breakGlass] starts. */
+    val breakGlassDurationMinutes: Int = 15,
     val loading: Boolean = true,
 )
 
@@ -49,6 +52,7 @@ class WallViewModel @Inject constructor(
                 _ui.value = _ui.value.copy(
                     state = state,
                     breakGlassUntilMs = breakGlassController.activeUntilMs(),
+                    breakGlassDurationMinutes = clampedBreakGlassMinutes(),
                     loading = false,
                 )
             }
@@ -60,6 +64,7 @@ class WallViewModel @Inject constructor(
         _ui.value = _ui.value.copy(
             state = arming.state(),
             breakGlassUntilMs = breakGlassController.activeUntilMs(),
+            breakGlassDurationMinutes = clampedBreakGlassMinutes(),
             loading = false,
         )
         viewModelScope.launch { loadCounts() }
@@ -71,14 +76,18 @@ class WallViewModel @Inject constructor(
     }
 
     /**
-     * Duration is read from [WallSettings] and clamped here even though the
-     * setter already clamps to 5..120: the getter does not, so a value of
-     * 1-4 persisted by an older build before that clamp existed would
-     * otherwise still be honoured verbatim.
+     * Read from [WallSettings] and clamped here even though the setter
+     * already clamps to 5..120: the getter does not, so a value of 1-4
+     * persisted by an older build before that clamp existed would otherwise
+     * still be honoured verbatim. Used for both the button's label (via
+     * [WallUiState.breakGlassDurationMinutes]) and the actual duration
+     * [breakGlass] starts, so the two can never disagree the way "Let
+     * everything through for 1 hour" once did against a 15-minute default.
      */
+    private fun clampedBreakGlassMinutes(): Int = wallSettings.breakGlassDurationMinutes.coerceIn(5, 120)
+
     fun breakGlass() {
-        val minutes = wallSettings.breakGlassDurationMinutes.coerceIn(5, 120)
-        breakGlassController.start(durationMs = minutes * 60_000L)
+        breakGlassController.start(durationMs = clampedBreakGlassMinutes() * 60_000L)
         refresh()
     }
 

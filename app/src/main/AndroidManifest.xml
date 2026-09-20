@@ -22,12 +22,18 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
-    <!-- Declared so Permissions.exactAlarmsAllowed()/exactAlarmSettingsIntent()
-         can surface this grant in Settings, but nothing in the current wall
-         model actually schedules an AlarmManager exact alarm: that was the
-         now-deleted profile layer's start/end boundary scheduling. Kept
-         declared (rather than dropped) only because the Settings screen still
-         shows and requests this permission; revisit if that UI is removed. -->
+    <!-- BreakGlassController schedules the exact alarm that closes a
+         break-glass window (and Permissions.exactAlarmsAllowed()/
+         exactAlarmSettingsIntent() surface this grant in Settings).
+         SCHEDULE_EXACT_ALARM is the runtime-revocable API 31+ grant;
+         BreakGlassController.schedule() checks canScheduleExactAlarms()
+         and falls back to setAndAllowWhileIdle() (non-exact, but still
+         Doze-safe) when it is denied. USE_EXACT_ALARM is the API 33+
+         install-time alternative, but it is Play-policy-restricted to apps
+         whose core function is alarms or calendaring; this app almost
+         certainly does not qualify, so in practice API 33+ devices exercise
+         the SCHEDULE_EXACT_ALARM / canScheduleExactAlarms() runtime-grant
+         path. Flagged as a deployment consideration in the task-9 report. -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 

@@ -71,13 +71,12 @@ fun WallScreen(nav: NavHostController) {
                 .padding(bottom = 24.dp),
         ) {
             val breakGlassUntilMs = ui.breakGlassUntilMs
+            // Blocked states are checked first, ahead of the break-glass
+            // countdown: a listener disconnect mid-window is exactly the
+            // condition that will make the pending re-arm fail (see
+            // BreakGlassController.finishExpiry), so it is more urgent than
+            // a cheerful countdown and must not be hidden behind one.
             when {
-                breakGlassUntilMs != null -> {
-                    BreakGlassHero(untilMs = breakGlassUntilMs, onReArmNow = vm::cancelBreakGlass)
-                }
-                ui.state == WallState.ARMED || ui.state == WallState.DISARMED -> {
-                    ToggleHero(state = ui.state, onToggle = vm::toggle)
-                }
                 ui.state == WallState.BLOCKED_NO_LISTENER -> {
                     BlockedCard(
                         message = "Notification access is off",
@@ -92,6 +91,12 @@ fun WallScreen(nav: NavHostController) {
                         onFix = { context.startActivity(Permissions.dndAccessIntent()) },
                     )
                 }
+                breakGlassUntilMs != null -> {
+                    BreakGlassHero(untilMs = breakGlassUntilMs, onReArmNow = vm::cancelBreakGlass)
+                }
+                else -> {
+                    ToggleHero(state = ui.state, onToggle = vm::toggle)
+                }
             }
 
             Spacer(Modifier.height(20.dp))
@@ -100,7 +105,7 @@ fun WallScreen(nav: NavHostController) {
             if (breakGlassUntilMs == null) {
                 Spacer(Modifier.height(20.dp))
                 NfButton(
-                    text = "Let everything through for 1 hour",
+                    text = "Let everything through for ${formatBreakGlassDuration(ui.breakGlassDurationMinutes)}",
                     onClick = vm::breakGlass,
                     enabled = ui.state == WallState.ARMED || ui.state == WallState.DISARMED,
                     primary = false,
@@ -116,6 +121,18 @@ fun WallScreen(nav: NavHostController) {
 /** Minutes remaining, rounded up so the row never shows "0 min left". */
 private fun minutesLeft(untilMs: Long, nowMs: Long = System.currentTimeMillis()): Int =
     ((untilMs - nowMs).coerceAtLeast(0) + 59_999L).let { (it / 60_000L).toInt() }
+
+/**
+ * "Let everything through for N" label text, driven by the actual configured
+ * duration rather than a hardcoded "1 hour" -- the default is 15 minutes
+ * ([com.anuj.notificationfirewall.data.prefs.WallSettings]), so a fixed
+ * "1 hour" label would promise something the button did not do out of the box.
+ */
+private fun formatBreakGlassDuration(minutes: Int): String = when {
+    minutes < 60 -> "$minutes min"
+    minutes % 60 == 0 -> if (minutes == 60) "1 hour" else "${minutes / 60} hours"
+    else -> "${minutes / 60}h ${minutes % 60}min"
+}
 
 @Composable
 private fun BreakGlassHero(untilMs: Long, onReArmNow: () -> Unit) {

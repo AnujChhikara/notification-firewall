@@ -12,6 +12,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
+import org.robolectric.shadows.ShadowAlarmManager
 
 private const val NOW = 1_700_000_000_000L
 
@@ -73,7 +74,19 @@ class BreakGlassControllerTest {
         breakGlass.start()
 
         val alarms = shadowOf(context.getSystemService(android.app.AlarmManager::class.java))
-        assertTrue("re-arming must not depend on the app still running", alarms.scheduledAlarms.isNotEmpty())
+        assertEquals(
+            "re-arming must not depend on the app still running",
+            1,
+            alarms.scheduledAlarms.size,
+        )
+        val alarm = alarms.scheduledAlarms.single()
+        assertEquals(android.app.AlarmManager.RTC_WAKEUP, alarm.type)
+        assertEquals(NOW + BreakGlassController.DEFAULT_DURATION_MS, alarm.triggerAtTime)
+        assertEquals(
+            "the alarm must target BreakGlassReceiver, not merely exist",
+            BreakGlassReceiver::class.java.name,
+            shadowOf(alarm.operation).savedIntent.component?.className,
+        )
     }
 
     @Test
@@ -157,5 +170,136 @@ class BreakGlassControllerTest {
 
         assertEquals(original.priorityCategories, nm.notificationPolicy.priorityCategories)
         assertEquals(original.priorityCallSenders, nm.notificationPolicy.priorityCallSenders)
+    }
+
+    // --- CRITICAL 1: the alarm wakes a cold-started process in the normal
+    // case, and NfApplication.onCreate leaves listenerConnected == false
+    // until the listener rebinds. arm() correctly refuses in that window --
+    // the deadline must survive the refusal, or nothing is left to retry.
+
+    @Test
+    fun expiryDoesNotEraseTheDeadlineWhenTheListenerIsNotConnectedYet() {
+        arming.arm()
+        breakGlass.start()
+        now = NOW + BreakGlassController.DEFAULT_DURATION_MS + 1
+        prefs.listenerConnected = false // the realistic cold-start state
+
+        breakGlass.handleExpiryAlarm()
+
+        assertEquals(
+            "arm() refused (BLOCKED_NO_LISTENER); erasing the deadline here would strand the wall open forever",
+            true,
+            prefs.breakGlassUntilMs != 0L,
+        )
+        assertEquals(WallState.BLOCKED_NO_LISTENER, arming.state())
+    }
+
+    @Test
+    fun expirySchedulesARetryAlarmWhenTheListenerIsNotConnectedYet() {
+        breakGlass.start()
+        now = NOW + BreakGlassController.DEFAULT_DURATION_MS + 1
+        prefs.listenerConnected = false
+
+        breakGlass.handleExpiryAlarm()
+
+        val alarms = shadowOf(context.getSystemService(android.app.AlarmManager::class.java))
+        assertTrue(
+            "a refused re-arm must leave a fresh alarm behind, or the window never closes",
+            alarms.scheduledAlarms.isNotEmpty(),
+        )
+        assertTrue(
+            "the retry must be scheduled in the future, not immediately",
+            alarms.scheduledAlarms.single().triggerAtTime > now,
+        )
+    }
+
+    @Test
+    fun restoreAfterBootRetriesInsteadOfErasingTheDeadlineWhenTheListenerIsNotConnectedYet() {
+        // BootReceiver runs in a freshly-started process: listenerConnected
+        // is guaranteed false until NfListenerService rebinds.
+        arming.arm()
+        breakGlass.start()
+        now = NOW + BreakGlassController.DEFAULT_DURATION_MS + 60_000
+        prefs.listenerConnected = false
+
+        breakGlass.restoreAfterBoot()
+
+        assertEquals(WallState.BLOCKED_NO_LISTENER, arming.state())
+        assertEquals(
+            "the deadline must not be erased while arm() is refusing",
+            true,
+            prefs.breakGlassUntilMs != 0L,
+        )
+        val alarms = shadowOf(context.getSystemService(android.app.AlarmManager::class.java))
+        assertTrue(
+            "a retry must be scheduled so the window can still close later",
+            alarms.scheduledAlarms.isNotEmpty(),
+        )
+    }
+
+    @Test
+    fun retryPendingExpiryFinishesTheWindowOnceTheListenerReconnects() {
+        arming.arm()
+        breakGlass.start()
+        now = NOW + BreakGlassController.DEFAULT_DURATION_MS + 1
+        prefs.listenerConnected = false
+        breakGlass.handleExpiryAlarm() // the alarm fires first, into a cold process; it retries
+
+        assertEquals(WallState.BLOCKED_NO_LISTENER, arming.state())
+
+        // NfListenerService.onListenerConnected fires moments later.
+        prefs.listenerConnected = true
+        breakGlass.retryPendingExpiry()
+
+        assertEquals(WallState.ARMED, arming.state())
+        assertNull(breakGlass.activeUntilMs())
+    }
+
+    @Test
+    fun retryPendingExpiryIsANoOpWhenNothingIsPending() {
+        // No break-glass window was ever opened -- must not spuriously arm.
+        breakGlass.retryPendingExpiry()
+        assertEquals(WallState.DISARMED, arming.state())
+    }
+
+    // --- IMPORTANT: activeUntilMs() must catch the user turning DND on
+    // themselves mid-window too, not just another caller arming the wall --
+    // otherwise the countdown lies in the mirror-image direction from P9.
+
+    @Test
+    fun activeUntilMsReturnsNullIfTheUserTurnsOnDndThemselvesMidWindow() {
+        breakGlass.start()
+        // The user opens the system shade and turns DND on themselves.
+        // dndSetByApp stays false, so arming.state() would read DISARMED --
+        // activeUntilMs() must not trust that and must check the live filter.
+        nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
+
+        assertEquals(WallState.DISARMED, arming.state())
+        assertNull(
+            "the countdown must not keep claiming break-glass once the filter is no longer ALL",
+            breakGlass.activeUntilMs(),
+        )
+
+        val alarms = shadowOf(context.getSystemService(android.app.AlarmManager::class.java))
+        assertTrue("the dangling alarm must be cancelled", alarms.scheduledAlarms.isEmpty())
+    }
+
+    // --- IMPORTANT: the inexact fallback must still be Doze-safe.
+
+    @Test
+    fun fallsBackToAllowWhileIdleWhenExactAlarmsAreDenied() {
+        ShadowAlarmManager.setCanScheduleExactAlarms(false)
+        try {
+            breakGlass.start()
+
+            val alarms = shadowOf(context.getSystemService(android.app.AlarmManager::class.java))
+            val alarm = alarms.scheduledAlarms.single()
+            assertTrue(
+                "a denied exact-alarm grant must still fall back to an idle-safe alarm, not a plain set()",
+                alarm.isAllowWhileIdle,
+            )
+        } finally {
+            ShadowAlarmManager.setCanScheduleExactAlarms(true)
+        }
     }
 }
