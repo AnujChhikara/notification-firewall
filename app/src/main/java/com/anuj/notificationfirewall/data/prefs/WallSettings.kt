@@ -36,16 +36,21 @@ class WallSettings(private val prefs: SharedPreferences) {
     /**
      * When the daily digest fires, as minutes since midnight (0–1439).
      * Nothing schedules against this yet (see [com.anuj.notificationfirewall.work.DigestScheduler]) —
-     * Settings owns the knob, a later task wires the trigger to it.
+     * Settings owns the knob; Task 10 (daily digest) wires the trigger to it.
      */
     var digestTimeMinuteOfDay: Int
         get() = prefs.getInt(KEY_DIGEST_TIME_MINUTE, DEFAULT_DIGEST_TIME_MINUTE)
         set(value) = prefs.edit { putInt(KEY_DIGEST_TIME_MINUTE, value.coerceIn(0, 1439)) }
 
-    /** How long a break-glass window stays open once triggered, in minutes. */
+    /**
+     * How long a break-glass window stays open once triggered, in minutes.
+     * Settings owns the knob; Task 9 (break-glass) is what reads it and
+     * actually opens/closes the window (nothing sets [breakGlassUntilMs] in
+     * [com.anuj.notificationfirewall.ui.wall.WallUiState] yet).
+     */
     var breakGlassDurationMinutes: Int
         get() = prefs.getInt(KEY_BREAK_GLASS_MINUTES, DEFAULT_BREAK_GLASS_MINUTES)
-        set(value) = prefs.edit { putInt(KEY_BREAK_GLASS_MINUTES, value.coerceIn(1, 120)) }
+        set(value) = prefs.edit { putInt(KEY_BREAK_GLASS_MINUTES, value.coerceIn(5, 120)) }
 
     private companion object {
         const val KEY_THRESHOLD = "wall_threshold"

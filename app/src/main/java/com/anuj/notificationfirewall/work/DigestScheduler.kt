@@ -32,7 +32,7 @@ fun delayUntilNextMillis(nowMinuteOfDay: Int, endMinuteOfDay: Int): Long {
  *
  * Decoupled from the profile/rule model (Task 11): this no longer knows what a
  * "profile" is, only a labeled window and a delay. Nothing currently calls
- * [schedule] — Task 12 (background workers) wires a real trigger back up now
+ * [schedule] — Task 10 (daily digest) wires a real trigger back up now
  * that the profile-window concept it used to hang off of is gone.
  */
 @Singleton

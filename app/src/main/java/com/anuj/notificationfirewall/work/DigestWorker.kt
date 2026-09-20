@@ -27,7 +27,7 @@ private const val DIGEST_CHANNEL_ID = "nf_digest"
  *
  * Decoupled from the profile/rule model (Task 11): it used to look up its
  * window and display name from a profile; now both arrive as plain input
- * data, and it no longer reschedules itself. Task 12 (background workers)
+ * data, and it no longer reschedules itself. Task 10 (daily digest)
  * owns deciding when a digest should run and wiring a real caller back up.
  */
 @HiltWorker
