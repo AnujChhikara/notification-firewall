@@ -4,6 +4,7 @@ package com.anuj.notificationfirewall.ui.onboarding
 import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,10 +16,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
@@ -194,7 +197,11 @@ private fun StepCard(
 @Composable
 private fun JevKeyStep(onSave: (String) -> Unit) {
     val c = LocalWallColors.current
-    var field by remember { mutableStateOf("") }
+    var field by rememberSaveable { mutableStateOf("") }
+    // Masked by default, matching KeysScreen's identical Jev-key field (see
+    // its PasswordVisualTransformation() default and Show/Hide toggle) --
+    // this is the same secret, so it gets the same guard, not a weaker one.
+    var visible by rememberSaveable { mutableStateOf(false) }
     NfCard {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Jev API key", style = MaterialTheme.typography.titleLarge, color = c.title)
@@ -209,14 +216,22 @@ private fun JevKeyStep(onSave: (String) -> Unit) {
                 onValueChange = { field = it },
                 label = { Text("Jev API key") },
                 singleLine = true,
+                visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth(),
             )
-            NfButton(
-                text = "Save and continue",
-                onClick = { onSave(field) },
-                enabled = field.isNotBlank(),
-                modifier = Modifier.fillMaxWidth(),
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                NfButton(
+                    text = if (visible) "Hide" else "Show",
+                    primary = false,
+                    onClick = { visible = !visible },
+                )
+                NfButton(
+                    text = "Save and continue",
+                    onClick = { onSave(field) },
+                    enabled = field.isNotBlank(),
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
     }
 }
