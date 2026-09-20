@@ -235,7 +235,7 @@ private fun SensitivityCard(ui: SettingsUiState, onChange: (Float) -> Unit) {
                 else -> buildString {
                     if (preview.wouldRingMore > 0) append("${preview.wouldRingMore} more would have rung you today")
                     if (preview.wouldRingMore > 0 && preview.wouldSilenceMore > 0) append(" · ")
-                    if (preview.wouldSilenceMore > 0) append("${preview.wouldSilenceMore} fewer would have")
+                    if (preview.wouldSilenceMore > 0) append("${preview.wouldSilenceMore} fewer would have rung")
                 }
             }
             Text(previewLine, style = MaterialTheme.typography.labelMedium, color = c.textMuted)
