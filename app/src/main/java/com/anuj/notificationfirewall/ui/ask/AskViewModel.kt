@@ -74,7 +74,7 @@ class AskViewModel @Inject constructor(
     private val notificationDao: NotificationDao,
     private val senderBiasDao: SenderBiasDao,
     private val askService: AskService,
-    securePrefs: SecurePrefs,
+    private val securePrefs: SecurePrefs,
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(AskUiState(hasKey = securePrefs.hasKey))
@@ -113,6 +113,10 @@ class AskViewModel @Inject constructor(
         }
 
         _ui.value = _ui.value.copy(
+            // Re-read on every load, not once in the initialiser: this ViewModel
+            // survives navigating to Settings and back, so a key set while it was
+            // off-screen must un-hide the composer on return.
+            hasKey = securePrefs.hasKey,
             stats = AskStats(
                 total = notificationDao.countSince(since),
                 keptQuiet = notificationDao.countKeptQuietSince(since),

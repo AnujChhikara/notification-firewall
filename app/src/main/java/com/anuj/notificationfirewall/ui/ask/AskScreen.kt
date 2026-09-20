@@ -265,8 +265,12 @@ private fun NoKeyCard(onOpenSettings: () -> Unit) {
 private fun EmptyChatHint() {
     NfCard {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            CardCaption("Try: “who interrupted me most last week?”")
-            CardCaption("Your notifications stay here. Only the question, the table names and the counts are sent.")
+            CardCaption("Try: “which apps interrupted me most last week?”")
+            CardCaption(
+                "Your messages stay here. What is sent is the question, the table and " +
+                    "column names, and the counts that come back — which can include app " +
+                    "names, but never a title, a body or a sender.",
+            )
         }
     }
 }

@@ -51,7 +51,38 @@ object SqlValidator {
     const val MAX_LIMIT = 500
 
     private val KNOWN_TABLES = setOf("notifications", "verdict_cache", "sender_bias", "overrides")
-    private val CONTENT_COLUMNS = setOf("title", "text")
+
+    /**
+     * Content is defined by provenance, not by column name.
+     *
+     * `senderKey` is not a derived identifier: [com.anuj.notificationfirewall.service.NotificationMapper]
+     * assigns `senderKey = title`, verbatim, and `title` is
+     * `EXTRA_TITLE` — for an e-mail client, often the subject line.
+     * `contentShape` is `MD5(normalize("$title $text"))`, and normalisation
+     * removes nothing lexical, so it is a recoverable digest of the message.
+     * Both therefore sit behind the same per-question opt-in as `title` and
+     * `text` themselves.
+     *
+     * The alternative reading — that content means the two columns we happened
+     * to name "title" and "text" — would make the privacy boundary an accident
+     * of naming, and the retention job already contradicts it: `purgeTextBefore`
+     * nulls `title` and `text` while leaving `senderKey` holding the same string,
+     * so a name-based rule would let Ask send values the app already promised to
+     * purge.
+     *
+     * `overrides.label` is here for the same reason and was found by applying
+     * the rule rather than reading a list: `InboxViewModel.addOverride` passes
+     * `label = row.sender ?: row.appLabel`, and `row.sender` is `senderKey`,
+     * which is the title. A swipe-created override therefore stores a raw
+     * title in `label`. (`appLabel` is a different column and is not matched
+     * here — `\blabel\b` does not match `applabel`.)
+     *
+     * Stored lowercase: the checks below run over a lowercased statement.
+     * `packageName`, `appLabel`, timestamps, buckets, scores and decision
+     * sources are metadata this app produced about itself and stay freely
+     * aggregable.
+     */
+    private val CONTENT_COLUMNS = setOf("title", "text", "senderkey", "contentshape", "label")
 
     private val FORBIDDEN = listOf(
         "insert", "update", "delete", "drop", "alter", "create", "replace",
@@ -350,7 +381,7 @@ object SqlValidator {
                 return SqlVerdict.Rejected("SELECT * would expose notification content")
             }
             CONTENT_COLUMNS.firstOrNull { Regex("""\b$it\b""").containsMatchIn(masked) }
-                ?.let { return SqlVerdict.Rejected("Column '$it' holds notification content") }
+                ?.let { return SqlVerdict.Rejected("Column '$it' derives from notification content") }
         }
 
         if (LIMIT_KEYWORD.findAll(masked).count() != 1) {

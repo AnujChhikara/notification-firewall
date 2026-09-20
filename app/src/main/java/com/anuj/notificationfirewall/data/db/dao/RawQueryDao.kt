@@ -63,6 +63,11 @@ class RawQueryDao(private val db: NfDatabase) {
      * whole duration. The pragma is then read back on that same connection —
      * if it did not take, nothing runs.
      *
+     * TODO: this takes a write lock (`beginTransaction` is BEGIN EXCLUSIVE),
+     * so a question briefly blocks the ingest pipeline. A genuinely read-only
+     * *connection* would be better than a read-only *session*, but Room does
+     * not expose one; revisit if Room ever does.
+     *
      * Internal rather than private so a test can drive a write straight into
      * the session, past every other gate, and prove this one holds alone.
      */
@@ -108,59 +113,7 @@ class RawQueryDao(private val db: NfDatabase) {
             throw UnsafeQueryException("The query plan could not be read: ${e.message}")
         }
 
-        if (plan.isEmpty()) throw UnsafeQueryException("The query produced no plan to inspect")
-        plan.forEach(::checkPlanLine)
-    }
-
-    /**
-     * One `EXPLAIN QUERY PLAN` detail line, accounted for or rejected.
-     *
-     * A line either names a base table SQLite will read — which must be
-     * allow-listed — or is one of a small set of structural steps that
-     * introduce no table of their own (sorting, a co-routine, a subquery
-     * whose own lines are checked separately). Anything else falls through
-     * to a rejection rather than being waved past as "probably harmless".
-     */
-    private fun checkPlanLine(detail: String) {
-        val line = detail.trim()
-
-        val target = SCAN_LINE.find(line)?.groupValues?.get(1)
-            ?: BLOOM_LINE.find(line)?.groupValues?.get(1)
-        if (target != null) {
-            val table = planTargetTable(target, line)
-            if (table != null && table.lowercase() !in KNOWN_TABLES) {
-                throw UnsafeQueryException("The query plan reaches a table outside the Ask schema: $table")
-            }
-            return
-        }
-
-        if (STRUCTURAL_PLAN_LINES.any { it.matches(line) }) return
-
-        throw UnsafeQueryException("Unrecognised query plan step, refusing to run: $line")
-    }
-
-    /**
-     * The base table a SCAN/SEARCH line reads, or null when the line reads
-     * something that is not a table at all — a constant row, or a subquery
-     * (referenced by its number or as `SUBQUERY n`) whose own plan lines are
-     * checked in their own right.
-     */
-    private fun planTargetTable(rawTarget: String, line: String): String? {
-        var text = rawTarget.trim()
-        for (marker in listOf(" USING ", " VIRTUAL TABLE ")) {
-            val at = text.indexOf(marker, ignoreCase = true)
-            if (at >= 0) text = text.substring(0, at)
-        }
-        val head = text.trim().split(WHITESPACE).firstOrNull { it.isNotEmpty() }
-            ?: throw UnsafeQueryException("Unrecognised query plan step, refusing to run: $line")
-
-        if (head.equals("CONSTANT", ignoreCase = true)) return null
-        if (head.equals("SUBQUERY", ignoreCase = true)) return null
-        if (head.toIntOrNull() != null) return null
-        if (!IDENTIFIER.matches(head)) {
-            throw UnsafeQueryException("Unrecognised query plan step, refusing to run: $line")
-        }
-        return head
+        assertPlanIsAttributable(sql, plan)
     }
 
     private fun readCapped(
@@ -172,9 +125,9 @@ class RawQueryDao(private val db: NfDatabase) {
         // this decision is made before any row is materialised.
         val columns = cursor.columnNames.toList()
         if (!allowContent) {
-            columns.firstOrNull(::isContentColumn)?.let {
+            columns.firstOrNull { isContentColumn(it) }?.let {
                 throw UnsafeQueryException(
-                    "The result would expose the '$it' column, which holds notification content",
+                    "The result would expose the '$it' column, which derives from notification content",
                 )
             }
         }
@@ -187,24 +140,55 @@ class RawQueryDao(private val db: NfDatabase) {
         QueryResult(columns, rows)
     }
 
-    private fun isContentColumn(name: String): Boolean {
-        val bare = name.substringAfterLast('.').trim().trim('"', '`', '[', ']').lowercase()
-        return bare in CONTENT_COLUMNS
-    }
+    internal companion object {
 
-    private companion object {
         val KNOWN_TABLES = setOf("notifications", "verdict_cache", "sender_bias", "overrides")
-        val CONTENT_COLUMNS = setOf("title", "text")
 
-        val WHITESPACE = Regex("""\s+""")
-        val IDENTIFIER = Regex("""[A-Za-z_][A-Za-z0-9_]*""")
+        /**
+         * Content is defined by provenance, not by column name — see
+         * SqlValidator's CONTENT_COLUMNS for the full argument. `senderKey` IS
+         * the title string (`NotificationMapper` assigns `senderKey = title`
+         * verbatim), and `contentShape` is an unsalted digest of title + text
+         * from which nothing lexical was removed. `overrides.label` holds
+         * `row.sender ?: row.appLabel` for a swipe-created override, and
+         * `row.sender` is `senderKey`, so it too can hold a raw title. All
+         * four are content and sit behind the same per-question opt-in.
+         * `appLabel` is a different column and is not matched.
+         *
+         * Stored lowercase; [isContentColumn] lowercases before comparing.
+         */
+        val CONTENT_COLUMNS = setOf("title", "text", "senderkey", "contentshape", "label")
+
+        private val WHITESPACE = Regex("""\s+""")
+        private val IDENTIFIER = Regex("""[A-Za-z_][A-Za-z0-9_]*""")
 
         // `SCAN TABLE t` is the pre-3.24 spelling; `SCAN t` the modern one.
-        val SCAN_LINE = Regex("""^(?:SCAN|SEARCH)\s+(?:TABLE\s+)?(.+)$""", RegexOption.IGNORE_CASE)
-        val BLOOM_LINE = Regex("""^BLOOM FILTER ON\s+(.+)$""", RegexOption.IGNORE_CASE)
+        private val SCAN_LINE =
+            Regex("""^(?:SCAN|SEARCH)\s+(?:TABLE\s+)?(.+)$""", RegexOption.IGNORE_CASE)
+        private val BLOOM_LINE = Regex("""^BLOOM FILTER ON\s+(.+)$""", RegexOption.IGNORE_CASE)
+
+        /** `FROM t`, `JOIN t alias`, `FROM t AS alias`. */
+        private val FROM_OR_JOIN = Regex(
+            """\b(?:from|join)\s+([a-z_][a-z0-9_]*)(?:\s+(?:as\s+)?([a-z_][a-z0-9_]*))?""",
+            RegexOption.IGNORE_CASE,
+        )
+
+        /**
+         * Words that may follow a table name without being an alias. Without
+         * this, `FROM notifications WHERE …` would bind "where" as an alias of
+         * notifications, and a plan line reading a real table called `where`
+         * would then be waved through.
+         */
+        private val NOT_AN_ALIAS = setOf(
+            "where", "group", "having", "order", "limit", "offset", "join", "on", "using",
+            "inner", "left", "right", "full", "outer", "cross", "natural", "union",
+            "intersect", "except", "window", "returning",
+        )
+
+        private val STRING_LITERAL = Regex("""'[^']*'""")
 
         /** Plan steps that introduce no table of their own. */
-        val STRUCTURAL_PLAN_LINES = listOf(
+        private val STRUCTURAL_PLAN_LINES = listOf(
             Regex("""^USE TEMP B-TREE FOR .+$""", RegexOption.IGNORE_CASE),
             Regex(
                 """^(?:CORRELATED\s+)?(?:CO-ROUTINE|MATERIALIZE|SUBQUERY|SCALAR SUBQUERY|LIST SUBQUERY)\b.*$""",
@@ -214,5 +198,125 @@ class RawQueryDao(private val db: NfDatabase) {
             Regex("""^INDEX \d+$""", RegexOption.IGNORE_CASE),
             Regex("""^(?:LEFT-JOIN|RIGHT-JOIN|BLOCKED BY .+)$""", RegexOption.IGNORE_CASE),
         )
+
+        fun isContentColumn(name: String): Boolean {
+            val bare = name.substringAfterLast('.').trim().trim('"', '`', '[', ']').lowercase()
+            return bare in CONTENT_COLUMNS
+        }
+
+        /**
+         * Every `EXPLAIN QUERY PLAN` line must be attributable, either to an
+         * allow-listed table or to a structural step that reads no table.
+         *
+         * Alias resolution is the fiddly part and it is not optional: SQLite
+         * from 3.36 prints the *alias* in a plan, not the table — `SCAN n`,
+         * where an older SQLite printed `SCAN TABLE notifications AS n`. A
+         * gate that only recognises table names refuses nearly every joined
+         * query on a modern Android release. That fails closed rather than
+         * open, but a feature that refuses to work is still broken, and the
+         * SQLite bundled with Robolectric (3.32.2) cannot produce the modern
+         * spelling, so no end-to-end test would ever have shown it. Hence both
+         * the resolution below and the literal-plan-string tests that drive
+         * this function directly.
+         *
+         * Resolution is only ever allowed to make the check stricter or equal,
+         * never looser, because [tablesAndAliases] refuses outright if any
+         * FROM/JOIN identifier is not itself allow-listed. That closes the
+         * shadowing case — `FROM android_metadata AS notifications`, an alias
+         * wearing an allow-listed table's name — which alias resolution alone
+         * would otherwise wave straight through.
+         *
+         * Internal so a test can drive it with literal plan strings from a
+         * SQLite newer than the one Robolectric bundles.
+         */
+        fun assertPlanIsAttributable(sql: String, planLines: List<String>) {
+            if (planLines.isEmpty()) {
+                throw UnsafeQueryException("The query produced no plan to inspect")
+            }
+            val resolvable = tablesAndAliases(sql)
+            planLines.forEach { checkPlanLine(it, resolvable) }
+        }
+
+        /**
+         * Every name the statement itself says may legitimately appear in a
+         * plan: each allow-listed base table, plus any alias bound to one.
+         *
+         * Throws if the statement names no table at all, or names one outside
+         * the Ask schema — both of which make its aliases untrustworthy, and
+         * trustworthy aliases are the only reason this map is permitted to
+         * relax the table check at all. String literals are blanked first so
+         * `WHERE appLabel = 'from evil'` cannot inject a phantom table.
+         */
+        fun tablesAndAliases(sql: String): Set<String> {
+            val masked = STRING_LITERAL.replace(sql) { " ".repeat(it.value.length) }
+            val names = mutableSetOf<String>()
+            for (match in FROM_OR_JOIN.findAll(masked)) {
+                val table = match.groupValues[1].lowercase()
+                if (table !in KNOWN_TABLES) {
+                    throw UnsafeQueryException(
+                        "The statement names a table outside the Ask schema: ${match.groupValues[1]}",
+                    )
+                }
+                names += table
+                val alias = match.groupValues[2].lowercase()
+                if (alias.isNotEmpty() && alias !in NOT_AN_ALIAS) names += alias
+            }
+            if (names.isEmpty()) throw UnsafeQueryException("The statement names no table to read")
+            return names
+        }
+
+        /**
+         * One `EXPLAIN QUERY PLAN` detail line, accounted for or rejected.
+         *
+         * A line either names something SQLite will read — which must resolve
+         * to an allow-listed table — or is one of a small set of structural
+         * steps that introduce no table of their own (sorting, a co-routine, a
+         * subquery whose own lines are checked separately). Anything else falls
+         * through to a rejection rather than being waved past as "probably
+         * harmless".
+         */
+        private fun checkPlanLine(detail: String, resolvable: Set<String>) {
+            val line = detail.trim()
+
+            val target = SCAN_LINE.find(line)?.groupValues?.get(1)
+                ?: BLOOM_LINE.find(line)?.groupValues?.get(1)
+            if (target != null) {
+                val name = planTargetName(target, line)
+                if (name != null && name.lowercase() !in resolvable) {
+                    throw UnsafeQueryException(
+                        "The query plan reaches a table outside the Ask schema: $name",
+                    )
+                }
+                return
+            }
+
+            if (STRUCTURAL_PLAN_LINES.any { it.matches(line) }) return
+
+            throw UnsafeQueryException("Unrecognised query plan step, refusing to run: $line")
+        }
+
+        /**
+         * The table or alias a SCAN/SEARCH line reads, or null when the line
+         * reads something that is not a table at all — a constant row, or a
+         * subquery (referenced by its number or as `SUBQUERY n`) whose own plan
+         * lines are checked in their own right.
+         */
+        private fun planTargetName(rawTarget: String, line: String): String? {
+            var text = rawTarget.trim()
+            for (marker in listOf(" USING ", " VIRTUAL TABLE ")) {
+                val at = text.indexOf(marker, ignoreCase = true)
+                if (at >= 0) text = text.substring(0, at)
+            }
+            val head = text.trim().split(WHITESPACE).firstOrNull { it.isNotEmpty() }
+                ?: throw UnsafeQueryException("Unrecognised query plan step, refusing to run: $line")
+
+            if (head.equals("CONSTANT", ignoreCase = true)) return null
+            if (head.equals("SUBQUERY", ignoreCase = true)) return null
+            if (head.toIntOrNull() != null) return null
+            if (!IDENTIFIER.matches(head)) {
+                throw UnsafeQueryException("Unrecognised query plan step, refusing to run: $line")
+            }
+            return head
+        }
     }
 }

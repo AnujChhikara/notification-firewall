@@ -87,13 +87,30 @@ class RawQueryDaoTest {
     fun aWriteStatementLeavesTheDatabaseUntouched() = runTest {
         seed(3)
 
-        try {
+        val thrown = try {
             dao.run("DELETE FROM notifications")
             fail("a write statement must not run")
+            null
         } catch (e: Exception) {
-            // Either gate may fire first; neither may let the write through.
+            e
         }
 
+        // Named precisely, so this cannot pass because of an unrelated NPE or
+        // argument error. Exactly two outcomes are acceptable, and which one
+        // fires depends on the SQLite version rather than on anything in this
+        // class: on the 3.32.2 Robolectric bundles, EXPLAIN QUERY PLAN returns
+        // no rows at all for a DELETE, so the plan gate refuses it first; on a
+        // SQLite that does emit a plan for a DELETE, the plan is attributable
+        // and the read-only session is what stops it. Both are refusals by a
+        // named gate; anything else is a bug.
+        val planGateRefused = thrown is UnsafeQueryException &&
+            thrown.message!!.contains("no plan to inspect")
+        val readOnlyRefused = thrown is SQLiteException &&
+            thrown.toString().contains("readonly", ignoreCase = true)
+        assertTrue(
+            "expected a refusal from the plan gate or the read-only session, got $thrown",
+            planGateRefused || readOnlyRefused,
+        )
         assertEquals(3, rowCount())
     }
 
@@ -170,6 +187,62 @@ class RawQueryDaoTest {
     }
 
     @Test
+    fun refusesSenderKeyWhichIsTheTitleStringVerbatim() = runTest {
+        // NotificationMapper assigns `senderKey = title`. Grouping by it is the
+        // shape a model reaches for on "who messages me most", and it would ship
+        // raw titles -- including ones the retention job already purged from the
+        // title column -- straight to the phrasing call.
+        seed(2)
+        try {
+            dao.run("SELECT senderKey, COUNT(*) AS c FROM notifications GROUP BY senderKey LIMIT 20")
+            fail("senderKey is the title string and must not be returned")
+        } catch (e: UnsafeQueryException) {
+            assertTrue(e.message!!, e.message!!.contains("senderKey", ignoreCase = true))
+        }
+    }
+
+    @Test
+    fun refusesContentShapeWhichIsADigestOfTheMessage() = runTest {
+        seed(2)
+        try {
+            dao.run("SELECT contentShape, COUNT(*) AS c FROM notifications GROUP BY contentShape LIMIT 20")
+            fail("contentShape is a digest of title and text and must not be returned")
+        } catch (e: UnsafeQueryException) {
+            assertTrue(e.message!!, e.message!!.contains("contentShape", ignoreCase = true))
+        }
+    }
+
+    @Test
+    fun refusesSenderKeyReachedThroughAnotherTable() = runTest {
+        seed(1)
+        try {
+            dao.run("SELECT senderKey, bias FROM sender_bias LIMIT 20")
+            fail("senderKey is content wherever it is stored")
+        } catch (e: UnsafeQueryException) {
+            assertTrue(e.message!!, e.message!!.contains("senderKey", ignoreCase = true))
+        }
+    }
+
+    @Test
+    fun refusesAnOverrideLabelWhichUsuallyHoldsTheSenderKey() = runTest {
+        try {
+            dao.run("SELECT label, kind FROM overrides LIMIT 20")
+            fail("an override label can hold a raw title and must not be returned")
+        } catch (e: UnsafeQueryException) {
+            assertTrue(e.message!!, e.message!!.contains("label", ignoreCase = true))
+        }
+    }
+
+    @Test
+    fun appLabelIsMetadataAndStaysAggregable() = runTest {
+        seed(2)
+        val result = dao.run(
+            "SELECT appLabel, COUNT(*) AS c FROM notifications GROUP BY appLabel LIMIT 20",
+        )
+        assertEquals(listOf(listOf("Myntra", "2")), result.rows)
+    }
+
+    @Test
     fun contentColumnsAreReturnedWhenTheUserOptedIn() = runTest {
         seed(1)
         val result = dao.run("SELECT title FROM notifications LIMIT 10", allowContent = true)
@@ -230,7 +303,7 @@ class RawQueryDaoTest {
             "SELECT (SELECT COUNT(*) FROM notifications) AS total, COUNT(*) AS silenced " +
                 "FROM notifications WHERE bucket = 'SILENCE' LIMIT 1",
             "SELECT appLabel, COUNT(*) AS c FROM notifications " +
-                "LEFT JOIN verdict_cache ON verdict_cache.contentShape = notifications.contentShape " +
+                "LEFT JOIN verdict_cache ON verdict_cache.packageName = notifications.packageName " +
                 "GROUP BY appLabel ORDER BY c DESC LIMIT 5",
             "SELECT category, COUNT(*) AS c FROM notifications " +
                 "WHERE decisionSource IN ('JEV', 'CACHE') GROUP BY category ORDER BY c DESC LIMIT 20",
@@ -238,6 +311,108 @@ class RawQueryDaoTest {
         queries.forEach { sql ->
             assertTrue(sql, SqlValidator.validate(sql, allowContent = false) is SqlVerdict.Allowed)
             dao.run(sql) // must not throw
+        }
+    }
+
+    // --- Plan attribution, driven directly with literal plan strings ---------
+    //
+    // Robolectric 4.13 bundles SQLite 3.32.2, which still prints
+    // `SCAN TABLE notifications AS n`. From 3.36 SQLite prints the *alias*
+    // only -- `SCAN n` -- which no end-to-end test running on this Robolectric
+    // can ever produce. These drive the attribution logic with both spellings
+    // so the gate is not hostage to the bundled SQLite version.
+
+    private val joinSql =
+        "SELECT n.appLabel, COUNT(*) AS c FROM notifications n " +
+            "JOIN sender_bias b ON b.packageName = n.packageName GROUP BY n.appLabel LIMIT 5"
+
+    @Test
+    fun modernPlanSpellingNamingOnlyAliasesIsAttributed() {
+        // SQLite >= 3.36. This is what a real device emits.
+        RawQueryDao.assertPlanIsAttributable(
+            joinSql,
+            listOf("SCAN n", "SEARCH b USING AUTOMATIC COVERING INDEX (packageName=?)"),
+        )
+    }
+
+    @Test
+    fun legacyPlanSpellingNamingTablesIsAttributed() {
+        RawQueryDao.assertPlanIsAttributable(
+            joinSql,
+            listOf(
+                "SCAN TABLE notifications AS n",
+                "SEARCH TABLE sender_bias AS b USING AUTOMATIC COVERING INDEX (packageName=?)",
+            ),
+        )
+    }
+
+    @Test
+    fun aPlanNameThatIsNeitherTableNorAliasIsRejected() {
+        try {
+            RawQueryDao.assertPlanIsAttributable(joinSql, listOf("SCAN n", "SCAN android_metadata"))
+            fail("a plan line naming an unlisted table must be rejected")
+        } catch (e: UnsafeQueryException) {
+            assertTrue(e.message!!, e.message!!.contains("android_metadata"))
+        }
+    }
+
+    @Test
+    fun anAliasNotBoundByTheStatementIsRejected() {
+        try {
+            RawQueryDao.assertPlanIsAttributable(joinSql, listOf("SCAN z"))
+            fail("an alias the statement never bound must be rejected")
+        } catch (e: UnsafeQueryException) {
+            assertTrue(e.message!!, e.message!!.contains("z"))
+        }
+    }
+
+    @Test
+    fun anAliasWearingAnAllowListedTablesNameCannotLaunderAnUnlistedTable() {
+        // The shadowing case alias resolution alone would wave through.
+        try {
+            RawQueryDao.assertPlanIsAttributable(
+                "SELECT COUNT(*) AS c FROM android_metadata AS notifications LIMIT 1",
+                listOf("SCAN notifications"),
+            )
+            fail("an unlisted base table must be rejected however it is aliased")
+        } catch (e: UnsafeQueryException) {
+            assertTrue(e.message!!, e.message!!.contains("android_metadata"))
+        }
+    }
+
+    @Test
+    fun aTableNameHiddenInAStringLiteralIsNotMistakenForARealOne() {
+        // Masking literals keeps `'from evil'` from binding a phantom table --
+        // and, just as importantly, from being rejected as one.
+        val sql = "SELECT COUNT(*) AS c FROM notifications WHERE appLabel = 'from evil' LIMIT 1"
+        RawQueryDao.assertPlanIsAttributable(sql, listOf("SCAN notifications"))
+    }
+
+    @Test
+    fun aStatementNamingNoTableIsRejected() {
+        try {
+            RawQueryDao.assertPlanIsAttributable("SELECT 1 LIMIT 1", listOf("SCAN CONSTANT ROW"))
+            fail("a statement with no table to read must be rejected")
+        } catch (e: UnsafeQueryException) {
+            assertTrue(e.message!!, e.message!!.contains("no table"))
+        }
+    }
+
+    @Test
+    fun structuralPlanStepsAreAttributedWithoutNamingATable() {
+        RawQueryDao.assertPlanIsAttributable(
+            joinSql,
+            listOf("SCAN n", "SEARCH b USING INDEX x (packageName=?)", "USE TEMP B-TREE FOR GROUP BY"),
+        )
+    }
+
+    @Test
+    fun anUnrecognisedPlanStepIsRejectedRatherThanShruggedAt() {
+        try {
+            RawQueryDao.assertPlanIsAttributable(joinSql, listOf("SCAN n", "SOMETHING NEW AND ODD"))
+            fail("an unaccounted-for plan step must be rejected")
+        } catch (e: UnsafeQueryException) {
+            assertTrue(e.message!!, e.message!!.contains("SOMETHING NEW AND ODD"))
         }
     }
 

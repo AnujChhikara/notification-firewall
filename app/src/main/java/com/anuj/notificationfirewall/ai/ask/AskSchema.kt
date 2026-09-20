@@ -25,8 +25,8 @@ internal object AskSchema {
           title TEXT,                    -- CONTENT: usually the sender's name
           text TEXT,                     -- CONTENT: the message body
           timestampEpochMs INTEGER NOT NULL,
-          senderKey TEXT,                -- sender or conversation, may be NULL
-          contentShape TEXT NOT NULL,
+          senderKey TEXT,                -- CONTENT: this IS the title string, verbatim
+          contentShape TEXT NOT NULL,    -- CONTENT: an unsalted digest of title + text
           importanceScore REAL,          -- 1.0 (noise) .. 5.0 (critical)
           biasApplied REAL NOT NULL,     -- learned nudge, -0.75 .. 0.75
           category TEXT,                 -- PROMOTION|PERSONAL_MESSAGE|TRANSACTIONAL|
@@ -49,7 +49,9 @@ internal object AskSchema {
           isRead INTEGER NOT NULL
         );
         CREATE TABLE verdict_cache (
-          packageName TEXT NOT NULL, senderKey TEXT NOT NULL, contentShape TEXT NOT NULL,
+          packageName TEXT NOT NULL,
+          senderKey TEXT NOT NULL,       -- CONTENT
+          contentShape TEXT NOT NULL,    -- CONTENT
           importance REAL NOT NULL, category TEXT NOT NULL,
           isTimeSensitive REAL NOT NULL, isFromHuman REAL NOT NULL, needsAction REAL NOT NULL,
           confidence REAL NOT NULL, hitCount INTEGER NOT NULL,
@@ -57,13 +59,17 @@ internal object AskSchema {
           PRIMARY KEY (packageName, senderKey, contentShape)
         );
         CREATE TABLE sender_bias (
-          packageName TEXT NOT NULL, senderKey TEXT NOT NULL, bias REAL NOT NULL,
+          packageName TEXT NOT NULL,
+          senderKey TEXT NOT NULL,       -- CONTENT
+          bias REAL NOT NULL,
           correctionCount INTEGER NOT NULL, lastCorrectedEpochMs INTEGER NOT NULL,
           PRIMARY KEY (packageName, senderKey)
         );
         CREATE TABLE overrides (
           id INTEGER PRIMARY KEY, kind TEXT NOT NULL, packageName TEXT NOT NULL,
-          senderKey TEXT, label TEXT NOT NULL, source TEXT NOT NULL,
+          senderKey TEXT,                -- CONTENT
+          label TEXT NOT NULL,           -- CONTENT: often the senderKey, i.e. the title
+          source TEXT NOT NULL,
           createdAtEpochMs INTEGER NOT NULL
         );
     """.trimIndent()
@@ -80,10 +86,17 @@ internal object AskSchema {
         - Always include a LIMIT of at most ${SqlValidator.MAX_LIMIT}.
         - Timestamps are epoch milliseconds. Now is $nowEpochMs.
         - Prefer aggregates (COUNT, AVG, GROUP BY) over returning raw rows.
+        - Columns marked CONTENT (title, text, senderKey, contentShape, overrides.label)
+          all derive from the message itself: senderKey is the title verbatim,
+          contentShape is a digest of the title and body, and an override's label is
+          usually the senderKey. appLabel and packageName are NOT content.
         ${if (allowContent) {
-            "- You MAY select or filter on the title and text columns for this question."
+            "- You MAY select or filter on the CONTENT columns for this question."
         } else {
-            "- You must NOT reference the title or text columns anywhere, including WHERE clauses."
+            "- You must NOT reference title, text, senderKey, contentShape or label anywhere: " +
+                "not in SELECT, not in WHERE, not in GROUP BY, not in ORDER BY. " +
+                "To group notifications by who or what sent them, use appLabel or " +
+                "packageName, which name the app and are not message content."
         }}
     """.trimIndent()
 

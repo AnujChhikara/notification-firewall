@@ -201,6 +201,41 @@ class AskServiceTest {
     }
 
     @Test
+    fun groupingBySenderKeyIsRefusedBecauseThatColumnIsTheTitle() = runTest {
+        // The exact shape "who messages me most" produces. senderKey IS the
+        // title string, so phrasing this result would have sent raw titles.
+        seed("com.myntra", "Myntra", 2, title = "ZEBRAFISHTITLE", text = "ZEBRAFISHBODY")
+        server.enqueue(
+            chatResponse(
+                "SELECT senderKey, COUNT(*) AS c FROM notifications GROUP BY senderKey " +
+                    "ORDER BY c DESC LIMIT 20",
+            ),
+        )
+
+        val outcome = service.ask("who messages me most?", allowContent = false)
+
+        assertTrue(outcome.toString(), outcome is AskOutcome.Refused)
+        assertEquals("nothing may be phrased after a refusal", 1, server.requestCount)
+    }
+
+    @Test
+    fun theSchemaSentToTheModelMarksEverySenderDerivedColumnAsContent() = runTest {
+        seed("com.myntra", "Myntra", 1)
+        server.enqueue(chatResponse("SELECT COUNT(*) AS c FROM notifications LIMIT 1"))
+        server.enqueue(chatResponse("One."))
+
+        service.ask("how many?", allowContent = false)
+
+        val system = messageContents(server.takeRequest().body.readUtf8()).first()
+        assertTrue("senderKey must be marked as content", system.contains("senderKey TEXT,                -- CONTENT"))
+        assertTrue("contentShape must be marked as content", system.contains("contentShape TEXT NOT NULL,    -- CONTENT"))
+        assertTrue(
+            "the model must be steered to appLabel instead",
+            system.contains("use appLabel or"),
+        )
+    }
+
+    @Test
     fun contentIsSentOnlyWhenTheUserOptedInForThatQuestion() = runTest {
         seed("com.myntra", "Myntra", 1, title = "ZEBRAFISHTITLE", text = "ZEBRAFISHBODY")
         server.enqueue(chatResponse("SELECT title FROM notifications LIMIT 10"))

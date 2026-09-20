@@ -271,6 +271,22 @@ class AskViewModelTest {
     }
 
     @Test
+    fun aKeyAddedWhileTheScreenWasOffStageUnHidesTheChat() = runTest {
+        // The Ask back-stack entry and its ViewModel survive navigating to the
+        // Keys screen and back, so reading hasKey once in the initialiser would
+        // leave the "add a key" card up forever after the user added one.
+        prefs.openAiKey = null
+        val vm = viewModel()
+        vm.loadStats()
+        assertFalse(vm.ui.value.hasKey)
+
+        prefs.openAiKey = "sk-set-in-settings"
+        vm.loadStats()
+
+        assertTrue("returning from Settings with a key must reveal the composer", vm.ui.value.hasKey)
+    }
+
+    @Test
     fun blankQuestionsAreIgnored() = runTest {
         val vm = viewModel()
         vm.sendNow("   ")

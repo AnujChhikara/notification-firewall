@@ -933,4 +933,75 @@ class SqlValidatorTest {
         )
     }
 
+    // ── Content is provenance, not column naming ─────────────────────────────
+
+    @Test
+    fun senderKeyIsRejectedBecauseItIsTheTitleStringVerbatim() {
+        // NotificationMapper assigns `senderKey = title`. This is the query a
+        // model reaches for on "who messages me most", and it would ship raw
+        // notification titles to the phrasing call.
+        rejectedBecause(
+            "SELECT senderKey, COUNT(*) AS c FROM notifications GROUP BY senderKey " +
+                "ORDER BY c DESC LIMIT 20",
+            "senderkey",
+        )
+    }
+
+    @Test
+    fun senderKeyIsRejectedInAWhereClauseToo() {
+        rejectedBecause(
+            "SELECT COUNT(*) AS c FROM notifications WHERE senderKey LIKE 'a%' LIMIT 1",
+            "senderkey",
+        )
+    }
+
+    @Test
+    fun senderKeyIsRejectedWhereverItIsStored() {
+        rejectedBecause("SELECT senderKey, bias FROM sender_bias LIMIT 20", "senderkey")
+    }
+
+    @Test
+    fun contentShapeIsRejectedBecauseItIsADigestOfTheMessage() {
+        // MD5(normalize("$title $text")), unsalted, nothing lexical removed.
+        rejectedBecause(
+            "SELECT contentShape, COUNT(*) AS c FROM notifications GROUP BY contentShape LIMIT 20",
+            "contentshape",
+        )
+    }
+
+    @Test
+    fun overrideLabelIsRejectedBecauseItUsuallyHoldsTheSenderKey() {
+        // InboxViewModel.addOverride stores `row.sender ?: row.appLabel`, and
+        // row.sender is senderKey, which is the title. Found by applying the
+        // provenance rule rather than by reading a list of column names.
+        rejectedBecause("SELECT label, kind FROM overrides LIMIT 20", "label")
+    }
+
+    @Test
+    fun appLabelIsNotMistakenForTheOverrideLabelColumn() {
+        // \blabel\b must not match inside applabel, or the metadata column the
+        // model is supposed to group by would be unusable.
+        assertTrue(allowed("SELECT appLabel FROM notifications LIMIT 20"))
+    }
+
+    @Test
+    fun theContentColumnsAreAllAllowedWhenTheUserOptedIn() {
+        assertTrue(allowed("SELECT senderKey FROM notifications LIMIT 20", content = true))
+        assertTrue(allowed("SELECT contentShape FROM notifications LIMIT 20", content = true))
+        assertTrue(allowed("SELECT title, text FROM notifications LIMIT 20", content = true))
+        assertTrue(allowed("SELECT label FROM overrides LIMIT 20", content = true))
+    }
+
+    @Test
+    fun appLabelAndPackageNameStayFreelyAggregable() {
+        // Metadata the app produced about itself, not message content: this is
+        // the query "who spams me most" is supposed to become.
+        assertTrue(
+            allowed(
+                "SELECT appLabel, COUNT(*) AS c FROM notifications GROUP BY appLabel " +
+                    "ORDER BY c DESC LIMIT 20",
+            ),
+        )
+        assertTrue(allowed("SELECT packageName FROM notifications LIMIT 20"))
+    }
 }
