@@ -94,6 +94,24 @@
                 android:value="Keeps the notification firewall filtering while the wall is armed" />
         </service>
 
+        <!-- Quick Settings tile: arms/disarms the wall from the system shade.
+             Reads the same live ArmingController.state() as the Wall screen,
+             so the two can never disagree. exported="true" plus the
+             platform's BIND_QUICK_SETTINGS_TILE permission is the standard,
+             required pairing for a tile service: only the System UI process
+             holds that permission, so no third-party app can bind it despite
+             the exported flag. -->
+        <service
+            android:name=".service.WallTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_wall"
+            android:label="Notification Wall"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <!-- Re-asserts armed state after a reboot. Only listens to the protected
              BOOT_COMPLETED broadcast. -->
         <receiver
