@@ -15,4 +15,8 @@ interface SenderBiasDao {
 
     @Query("DELETE FROM sender_bias WHERE packageName = :pkg AND senderKey = :sender")
     suspend fun clear(pkg: String, sender: String)
+
+    /** Every correction the user has ever made, across all senders. */
+    @Query("SELECT COALESCE(SUM(correctionCount), 0) FROM sender_bias")
+    suspend fun totalCorrections(): Int
 }

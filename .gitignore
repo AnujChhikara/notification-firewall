@@ -25,3 +25,6 @@ captures/
 
 # Build artifacts (regenerable)
 *.apk
+
+# Kotlin compiler session dir (regenerable)
+.kotlin/

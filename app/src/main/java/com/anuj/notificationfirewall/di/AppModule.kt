@@ -8,6 +8,7 @@ import androidx.security.crypto.MasterKey
 import com.anuj.notificationfirewall.ai.DigestService
 import com.anuj.notificationfirewall.ai.OpenAiClient
 import com.anuj.notificationfirewall.ai.OpenAiDigestService
+import com.anuj.notificationfirewall.ai.ask.AskService
 import com.anuj.notificationfirewall.data.db.MIGRATION_3_4
 import com.anuj.notificationfirewall.data.db.MIGRATION_4_5
 import com.anuj.notificationfirewall.data.db.MIGRATION_5_6
@@ -15,6 +16,7 @@ import com.anuj.notificationfirewall.data.db.MIGRATION_6_7
 import com.anuj.notificationfirewall.data.db.NfDatabase
 import com.anuj.notificationfirewall.data.db.dao.NotificationDao
 import com.anuj.notificationfirewall.data.db.dao.OverrideDao
+import com.anuj.notificationfirewall.data.db.dao.RawQueryDao
 import com.anuj.notificationfirewall.data.db.dao.SenderBiasDao
 import com.anuj.notificationfirewall.data.db.dao.VerdictCacheDao
 import com.anuj.notificationfirewall.ai.jev.JevClient
@@ -42,6 +44,7 @@ private const val DATABASE_NAME = "notification-firewall.db"
 private const val SECURE_PREFS_FILE_NAME = "nf_secure_prefs"
 private const val OPENAI_BASE_URL = "https://api.openai.com/v1/"
 private const val JEV_BASE_URL = "https://api.typesafe.ai/"
+private const val ASK_MODEL = "gpt-4o-mini"
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -101,6 +104,15 @@ object AppModule {
             apiKey = securePrefs.openAiKey ?: "",
             http = http
         )
+
+    @Provides
+    @Singleton
+    fun provideRawQueryDao(db: NfDatabase): RawQueryDao = RawQueryDao(db)
+
+    @Provides
+    @Singleton
+    fun provideAskService(openAi: OpenAiClient, rawQueryDao: RawQueryDao): AskService =
+        AskService(openAi, rawQueryDao, model = ASK_MODEL)
 
     @Provides
     @Singleton

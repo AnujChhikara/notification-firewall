@@ -11,6 +11,9 @@ import kotlinx.coroutines.flow.Flow
 
 data class BucketCount(val bucket: WallBucket, val count: Int)
 
+/** One app and how many of its notifications matched — for the Ask tab's stat cards. */
+data class AppCount(val appLabel: String, val count: Int)
+
 @Dao
 interface NotificationDao {
     @Insert
@@ -80,4 +83,67 @@ interface NotificationDao {
             "WHERE timestampEpochMs >= :startMs AND timestampEpochMs < :endMs GROUP BY bucket",
     )
     suspend fun countsForDay(startMs: Long, endMs: Long): List<BucketCount>
+
+    // --- Ask tab stat cards -------------------------------------------------
+    //
+    // These are fixed, hand-written queries, not model-authored ones: the
+    // numbers on the cards are the app's own claims about itself and must not
+    // depend on what a language model felt like emitting today.
+    //
+    // How the odd decisionSource values are treated, deliberately:
+    //
+    //  * Arrival-shaped stats (noise ratio, top offenders, by hour) count
+    //    EVERY row regardless of decisionSource. `bucket` is NOT NULL for all
+    //    of them, and the bucket is what the user actually experienced --
+    //    a LEGACY or PENDING notification was still silenced or still rang.
+    //  * Verdict-shaped stats (the human share) count only rows that carry a
+    //    verdict, expressed as `isFromHuman IS NOT NULL`. That excludes
+    //    EXPIRED (text purged before any verdict could be obtained, so the
+    //    verdict columns are NULL by design), PENDING (not judged yet) and
+    //    LEGACY (judged by a scoring model that no longer exists) without
+    //    naming them, because the NULL *is* the fact. Dividing by a total
+    //    that included them would silently understate the human share.
+    //  * The correction rate divides by rows THIS app judged
+    //    (decisionSource IN ('JEV','CACHE')). It is the honesty metric — "how
+    //    often was I wrong" — so its denominator must be judgements the
+    //    current model actually made. LEGACY's judgements were another
+    //    model's; PENDING and EXPIRED never produced one.
+
+    @Query("SELECT COUNT(*) FROM notifications WHERE timestampEpochMs >= :startMs")
+    suspend fun countSince(startMs: Long): Int
+
+    @Query(
+        "SELECT COUNT(*) FROM notifications " +
+            "WHERE timestampEpochMs >= :startMs AND bucket <> 'RING'",
+    )
+    suspend fun countKeptQuietSince(startMs: Long): Int
+
+    @Query(
+        "SELECT appLabel, COUNT(*) AS count FROM notifications " +
+            "WHERE timestampEpochMs >= :startMs AND bucket <> 'RING' " +
+            "GROUP BY appLabel ORDER BY count DESC, appLabel ASC LIMIT :limit",
+    )
+    suspend fun topQuietedApps(startMs: Long, limit: Int): List<AppCount>
+
+    /** Rows carrying a real verdict — the only honest denominator for a verdict-derived share. */
+    @Query(
+        "SELECT COUNT(*) FROM notifications " +
+            "WHERE timestampEpochMs >= :startMs AND isFromHuman IS NOT NULL",
+    )
+    suspend fun countJudgedSince(startMs: Long): Int
+
+    @Query(
+        "SELECT COUNT(*) FROM notifications " +
+            "WHERE timestampEpochMs >= :startMs AND isFromHuman >= 0.5",
+    )
+    suspend fun countFromHumanSince(startMs: Long): Int
+
+    /** Timestamps only: the hour-of-day histogram is bucketed in the app's own
+     *  time zone, which SQLite's strftime cannot do correctly across DST. */
+    @Query("SELECT timestampEpochMs FROM notifications WHERE timestampEpochMs >= :startMs")
+    suspend fun timestampsSince(startMs: Long): List<Long>
+
+    /** Notifications this app's current classifier judged — the correction-rate denominator. */
+    @Query("SELECT COUNT(*) FROM notifications WHERE decisionSource IN ('JEV', 'CACHE')")
+    suspend fun countJudgedByThisApp(): Int
 }
