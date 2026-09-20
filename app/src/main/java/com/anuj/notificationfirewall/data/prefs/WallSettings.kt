@@ -54,6 +54,23 @@ class WallSettings(private val prefs: SharedPreferences) {
         get() = prefs.getInt(KEY_BREAK_GLASS_MINUTES, DEFAULT_BREAK_GLASS_MINUTES)
         set(value) = prefs.edit { putInt(KEY_BREAK_GLASS_MINUTES, value.coerceIn(5, 120)) }
 
+    /**
+     * Opaque JSON blob for the last digest [com.anuj.notificationfirewall.work.DigestWorker]
+     * built -- see [com.anuj.notificationfirewall.ai.DigestStore], the only
+     * reader/writer. Kept as an untyped string here (rather than WallSettings
+     * knowing about `PersistedDigest`) so this class doesn't need to depend
+     * on the `ai` package; DigestStore owns the schema and (de)serialization.
+     * Doubles as the "already ran today" stamp DigestWorker checks before
+     * doing any work, so a stray second fire on the same calendar day (e.g.
+     * from a mid-day settings change reschedule) is a no-op instead of a
+     * second notification.
+     */
+    var lastDigestJson: String?
+        get() = prefs.getString(KEY_LAST_DIGEST_JSON, null)
+        set(value) = prefs.edit {
+            if (value == null) remove(KEY_LAST_DIGEST_JSON) else putString(KEY_LAST_DIGEST_JSON, value)
+        }
+
     private companion object {
         const val KEY_THRESHOLD = "wall_threshold"
         const val KEY_OTP_FAST_PATH = "wall_otp_fast_path"
@@ -62,6 +79,7 @@ class WallSettings(private val prefs: SharedPreferences) {
         const val KEY_THEME_MODE = "wall_theme_mode"
         const val KEY_DIGEST_TIME_MINUTE = "wall_digest_time_minute"
         const val KEY_BREAK_GLASS_MINUTES = "wall_break_glass_minutes"
+        const val KEY_LAST_DIGEST_JSON = "wall_last_digest_json"
         const val DEFAULT_THRESHOLD = 4.0f
         const val DEFAULT_TEXT_RETENTION_DAYS = 30
         const val DEFAULT_DIGEST_TIME_MINUTE = 21 * 60 // 9:00 PM

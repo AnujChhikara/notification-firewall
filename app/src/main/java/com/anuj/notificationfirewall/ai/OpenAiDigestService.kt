@@ -47,7 +47,7 @@ object DigestBuilder {
             .filter { (it.importanceScore ?: 0f) >= WORTH_A_LOOK_FLOOR }
             .sortedByDescending { it.importanceScore }
             .take(WORTH_A_LOOK_MAX)
-            .map { "${it.senderKey ?: it.appLabel}: ${it.title ?: "(content expired)"}" }
+            .map(::renderWorthALookLine)
 
         return DigestData(
             rang = records.count { it.bucket == WallBucket.RING },
@@ -57,6 +57,26 @@ object DigestBuilder {
             worthALook = worthALook,
         )
     }
+
+    /**
+     * Retention purges [NotificationRecordEntity.title] and `.text` but
+     * deliberately leaves [NotificationRecordEntity.senderKey] populated
+     * (see `NotificationDao.purgeTextBefore`) -- but senderKey is a verbatim
+     * copy of the title (`NotificationMapper.kt`: `val senderKey = title`),
+     * so a record purged by retention still has its title sitting in
+     * senderKey. Checking `title == null` here is NOT enough: it would
+     * render "<the purged title>: (content expired)", resurfacing on-device
+     * exactly the content retention promised to remove. [textPurgedAt] is
+     * the actual source of truth for "has this record's content been
+     * purged" -- when it is set, fall back to [NotificationRecordEntity.appLabel]
+     * for both halves of the line instead of trusting senderKey at all.
+     */
+    private fun renderWorthALookLine(record: NotificationRecordEntity): String =
+        if (record.textPurgedAt != null) {
+            "${record.appLabel}: (content expired)"
+        } else {
+            "${record.senderKey ?: record.appLabel}: ${record.title ?: "(content expired)"}"
+        }
 }
 
 /**
@@ -118,6 +138,12 @@ class OpenAiDigestService(
         val offenderSentence = data.topOffender
             ?.let { (label, count) -> " $label led with $count." }
             .orEmpty()
-        return "Yesterday: ${data.silenced} silenced, ${data.rang} let through.$offenderSentence"
+        // Only mentioned when non-zero: DROP is reachable solely from the
+        // user's own block list (never from Jev -- see WallBucket's KDoc),
+        // so most days it is zero and the brief's example sentence
+        // ("Yesterday: 312 silenced, 9 let through. Myntra led with 47.")
+        // stays exactly as specified.
+        val droppedSentence = if (data.dropped > 0) " ${data.dropped} dropped." else ""
+        return "Yesterday: ${data.silenced} silenced, ${data.rang} let through.$offenderSentence$droppedSentence"
     }
 }

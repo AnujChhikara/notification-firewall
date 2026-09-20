@@ -4,6 +4,8 @@ import android.app.NotificationManager
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import com.anuj.notificationfirewall.ai.DigestStore
+import com.anuj.notificationfirewall.ai.PersistedDigest
 import com.anuj.notificationfirewall.data.db.NfDatabase
 import com.anuj.notificationfirewall.data.prefs.SecurePrefs
 import com.anuj.notificationfirewall.data.prefs.WallSettings
@@ -14,11 +16,14 @@ import com.anuj.notificationfirewall.service.WallState
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
+import java.time.LocalDate
+import java.time.ZoneId
 
 @RunWith(RobolectricTestRunner::class)
 class WallViewModelTest {
@@ -28,6 +33,7 @@ class WallViewModelTest {
     private lateinit var db: NfDatabase
     private lateinit var prefs: SecurePrefs
     private lateinit var arming: ArmingController
+    private lateinit var digestStore: DigestStore
     private lateinit var vm: WallViewModel
 
     @Before
@@ -42,11 +48,48 @@ class WallViewModelTest {
         arming = ArmingController(context, DndController(context, prefs), prefs)
         val breakGlass = BreakGlassController(context, arming, prefs)
         val wallSettings = WallSettings(context.getSharedPreferences("test-wall-settings-vm", Context.MODE_PRIVATE))
-        vm = WallViewModel(arming, db.notificationDao(), breakGlass, wallSettings)
+        digestStore = DigestStore(wallSettings)
+        vm = WallViewModel(arming, db.notificationDao(), breakGlass, wallSettings, digestStore)
     }
 
     @After
     fun tearDown() = db.close()
+
+    private fun digest(dateEpochDay: Long) = PersistedDigest(
+        dateEpochDay = dateEpochDay,
+        headline = "Yesterday: 5 silenced, 1 let through.",
+        rang = 1, silenced = 5, dropped = 0,
+        topOffenderLabel = null, topOffenderCount = null, worthALook = emptyList(),
+    )
+
+    @Test
+    fun surfacesTodaysDigestOnTheCard() = runTest {
+        val today = LocalDate.now(ZoneId.systemDefault()).toEpochDay()
+        digestStore.save(digest(today))
+
+        vm.refresh()
+
+        assertEquals("Yesterday: 5 silenced, 1 let through.", vm.ui.value.digest?.headline)
+    }
+
+    @Test
+    fun hidesAStaleDigestInsteadOfShowingItAsCurrent() = runTest {
+        val longAgo = LocalDate.now(ZoneId.systemDefault()).toEpochDay() - 10
+        digestStore.save(digest(longAgo))
+
+        vm.refresh()
+
+        assertNull(
+            "a digest that old should not be presented as if it were current",
+            vm.ui.value.digest,
+        )
+    }
+
+    @Test
+    fun noDigestYetMeansNoCard() = runTest {
+        vm.refresh()
+        assertNull(vm.ui.value.digest)
+    }
 
     @Test
     fun reportsDisarmedInitially() = runTest {

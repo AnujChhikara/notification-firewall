@@ -34,13 +34,19 @@ class OpenAiDigestServiceTest {
     fun no_api_key_never_makes_a_network_call() = runBlocking {
         val text = serviceWithKey("").summarise(data())
         assertEquals(0, server.requestCount)
-        assertEquals("Yesterday: 312 silenced, 9 let through. Myntra led with 47.", text)
+        assertEquals("Yesterday: 312 silenced, 9 let through. Myntra led with 47. 4 dropped.", text)
     }
 
     @Test
     fun no_api_key_with_no_offender_still_reports_the_counts() = runBlocking {
-        val text = serviceWithKey("").summarise(data(topOffender = null))
+        val text = serviceWithKey("").summarise(data(topOffender = null, dropped = 0))
         assertEquals("Yesterday: 312 silenced, 9 let through.", text)
+    }
+
+    @Test
+    fun zero_dropped_matches_the_brief_verbatim_sentence() = runBlocking {
+        val text = serviceWithKey("").summarise(data(dropped = 0))
+        assertEquals("Yesterday: 312 silenced, 9 let through. Myntra led with 47.", text)
     }
 
     @Test
@@ -58,7 +64,7 @@ class OpenAiDigestServiceTest {
     fun http_error_falls_back_to_the_local_summary() = runBlocking {
         server.enqueue(MockResponse().setResponseCode(500))
         val text = serviceWithKey("sk-test").summarise(data())
-        assertEquals("Yesterday: 312 silenced, 9 let through. Myntra led with 47.", text)
+        assertEquals("Yesterday: 312 silenced, 9 let through. Myntra led with 47. 4 dropped.", text)
     }
 
     /**

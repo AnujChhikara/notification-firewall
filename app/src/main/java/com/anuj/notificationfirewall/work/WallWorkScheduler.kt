@@ -6,7 +6,26 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
+import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
 import java.util.concurrent.TimeUnit
+
+/**
+ * [DigestScheduler] is `@Singleton`/`@Inject`-managed by Hilt, but
+ * [WallWorkScheduler] is a plain object outside the Hilt graph (it runs from
+ * [com.anuj.notificationfirewall.NfApplication.onCreate], before any
+ * `@AndroidEntryPoint`/`@HiltViewModel` component exists to inject into).
+ * This is the same `EntryPointAccessors` pattern `NfApplication` already
+ * uses for `securePrefs`/`wallSettings`, used here so [scheduleDigest] gets
+ * the real singleton instance rather than a second ad hoc one.
+ */
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface DigestSchedulerEntryPoint {
+    fun digestScheduler(): DigestScheduler
+}
 
 /**
  * Registers the wall's background jobs. Idempotent — safe to call on
@@ -82,6 +101,7 @@ object WallWorkScheduler {
      * ignored by a stale `KEEP`d schedule.
      */
     fun scheduleDigest(context: Context, digestMinuteOfDay: Int) {
-        DigestScheduler(context).scheduleDaily(digestMinuteOfDay)
+        val entryPoint = EntryPointAccessors.fromApplication(context, DigestSchedulerEntryPoint::class.java)
+        entryPoint.digestScheduler().scheduleDaily(digestMinuteOfDay)
     }
 }

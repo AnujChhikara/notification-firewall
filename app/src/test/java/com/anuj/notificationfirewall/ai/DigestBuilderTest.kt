@@ -94,4 +94,25 @@ class DigestBuilderTest {
         assertEquals(0, data.silenced)
         assertNull(data.topOffender)
     }
+
+    /**
+     * Retention purges title/text but deliberately leaves senderKey set
+     * (see NotificationDao.purgeTextBefore), and senderKey is a verbatim
+     * copy of the title (NotificationMapper.kt). A record whose content was
+     * purged must not resurface that title via senderKey just because it
+     * still scores high enough for "worth a look".
+     */
+    @Test
+    fun worthALookNeverResurfacesAPurgedTitleThroughSenderKey() {
+        val purgedButScored = record("Gmail", WallBucket.SILENCE, importance = 4.0f, sender = "Landlord")
+            .copy(title = null, text = null, textPurgedAt = 1_700_000_500_000L)
+
+        val data = DigestBuilder.summarise(listOf(purgedButScored))
+
+        assertEquals(1, data.worthALook.size)
+        val line = data.worthALook.first()
+        assertTrue("purged content must not surface: $line", !line.contains("Landlord"))
+        assertTrue("falls back to the app label instead: $line", line.contains("Gmail"))
+        assertTrue("must say the content expired, not fabricate a title: $line", line.contains("content expired"))
+    }
 }

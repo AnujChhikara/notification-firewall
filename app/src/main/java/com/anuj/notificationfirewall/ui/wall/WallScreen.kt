@@ -30,6 +30,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
+import com.anuj.notificationfirewall.ai.PersistedDigest
 import com.anuj.notificationfirewall.domain.wall.WallBucket
 import com.anuj.notificationfirewall.service.WallState
 import com.anuj.notificationfirewall.ui.NfButton
@@ -113,9 +114,16 @@ fun WallScreen(nav: NavHostController) {
                 )
             }
 
-            // Task 10's brief scoped the daily digest to a posted system
-            // notification (DigestWorker/DigestScheduler), not a card on this
-            // screen -- no in-app digest surface exists here yet.
+            // Spec §5.1: "the most recent digest as a card." Nothing was
+            // computed here -- ui.digest is exactly what DigestWorker
+            // persisted after building the notification (see
+            // WallViewModel.loadDigestIfFresh), so this card can never show
+            // a different headline than the one the user was actually
+            // notified with.
+            ui.digest?.let { digest ->
+                Spacer(Modifier.height(20.dp))
+                DigestCard(digest)
+            }
         }
     }
 }
@@ -213,6 +221,44 @@ private fun ToggleHero(state: WallState, onToggle: () -> Unit) {
                 style = MaterialTheme.typography.labelMedium,
                 color = c.textMuted,
             )
+        }
+    }
+}
+
+/**
+ * Spec §5.1's "most recent digest as a card". Shows exactly [digest] as
+ * persisted by [com.anuj.notificationfirewall.work.DigestWorker] --
+ * [PersistedDigest.headline] is the literal sentence the notification led
+ * with (model prose or the local fallback, whichever actually ran), and
+ * [PersistedDigest.worthALook] is already purge-guarded by
+ * [com.anuj.notificationfirewall.ai.DigestBuilder] before it was ever
+ * persisted, so nothing extra needs to be filtered here.
+ */
+@Composable
+private fun DigestCard(digest: PersistedDigest) {
+    val c = LocalWallColors.current
+    NfCard(Modifier.padding(4.dp)) {
+        Column(Modifier.padding(20.dp)) {
+            Text("Yesterday's digest", style = MaterialTheme.typography.titleMedium, color = c.title)
+            Spacer(Modifier.height(6.dp))
+            Text(digest.headline, style = MaterialTheme.typography.bodyMedium, color = c.textMuted)
+            if (digest.worthALook.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "Worth a look",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = c.title,
+                )
+                Spacer(Modifier.height(4.dp))
+                digest.worthALook.forEach { line ->
+                    Text(
+                        "· $line",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = c.textMuted,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+            }
         }
     }
 }

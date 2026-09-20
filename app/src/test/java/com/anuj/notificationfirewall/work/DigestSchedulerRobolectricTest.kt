@@ -56,6 +56,28 @@ class DigestSchedulerRobolectricTest {
         assertEquals(1, workInfos().size)
     }
 
+    /**
+     * De-duplication alone (the test above) would also pass for a bug where
+     * the second call is silently ignored -- this proves UPDATE actually
+     * moved the fire time, not just that the count stayed at one.
+     */
+    @Test
+    fun changing_the_time_actually_moves_the_next_fire_time() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val scheduler = DigestScheduler(context)
+
+        scheduler.scheduleDaily(9 * 60)
+        val firstScheduleTime = workInfos().single().nextScheduleTimeMillis
+
+        scheduler.scheduleDaily(21 * 60)
+        val secondScheduleTime = workInfos().single().nextScheduleTimeMillis
+
+        assertTrue(
+            "rescheduling to a different minute-of-day must change the next fire time",
+            firstScheduleTime != secondScheduleTime,
+        )
+    }
+
     @Test
     fun cancel_removes_the_scheduled_work() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()

@@ -14,7 +14,10 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.anuj.notificationfirewall.ai.DigestBuilder
+import com.anuj.notificationfirewall.ai.DigestData
 import com.anuj.notificationfirewall.ai.DigestService
+import com.anuj.notificationfirewall.ai.DigestStore
+import com.anuj.notificationfirewall.ai.PersistedDigest
 import com.anuj.notificationfirewall.data.db.dao.NotificationDao
 import com.anuj.notificationfirewall.service.NfChannels
 import com.anuj.notificationfirewall.ui.MainActivity
@@ -39,13 +42,25 @@ private const val DIGEST_NOTIFICATION_ID = 42
  * so a record landing exactly at midnight belongs to exactly one digest.
  *
  * Privacy: [DigestBuilder.summarise] is pure and entirely on-device. Its
- * output, [com.anuj.notificationfirewall.ai.DigestData], is split two ways
- * here -- the aggregate counts and the offender's app label go to
- * [digestService] (which may call OpenAI for nicer prose; see its KDoc for
- * exactly what it sends), while `worthALook` -- built from sender names and
- * titles, content per Task 6's provenance rule -- is appended to the
- * notification body directly, by this worker, and is never passed to
- * [digestService].
+ * output, [DigestData], is split two ways here -- the aggregate counts and
+ * the offender's app label go to [digestService] (which may call OpenAI for
+ * nicer prose; see its KDoc for exactly what it sends), while `worthALook`
+ * -- built from sender names and titles, content per Task 6's provenance
+ * rule -- is appended to the notification body directly, by this worker,
+ * and is never passed to [digestService].
+ *
+ * One-per-day, even across a same-day reschedule: [digestStore] doubles as
+ * the "already ran today" stamp. `DigestScheduler.scheduleDaily` recomputes
+ * its initial delay from the current clock every time it's called (needed
+ * so a settings-screen time change takes effect immediately), which means
+ * an ordinary "change the digest time this morning" can leave a same-day
+ * fire still pending from the old schedule alongside the new one. Rather
+ * than trying to prevent that at the WorkManager level, [doWork] makes a
+ * second same-day fire a cheap no-op: it checks the persisted digest's
+ * [PersistedDigest.dateEpochDay] before doing any DB or network work, and
+ * bails if today's digest already exists -- so the user never sees two
+ * digest notifications, and a second OpenAI call (which could produce a
+ * different sentence than the first) never happens.
  */
 @HiltWorker
 class DigestWorker @AssistedInject constructor(
@@ -53,17 +68,43 @@ class DigestWorker @AssistedInject constructor(
     @Assisted params: WorkerParameters,
     private val notificationDao: NotificationDao,
     private val digestService: DigestService,
+    private val digestStore: DigestStore,
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
         val zone = ZoneId.systemDefault()
         val today = LocalDate.now(zone)
+        val todayEpochDay = today.toEpochDay()
+
+        if (digestStore.load()?.dateEpochDay == todayEpochDay) {
+            Log.d(TAG, "Digest already posted today; skipping duplicate fire")
+            return Result.success()
+        }
+
         val startMs = today.minusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
         val endMs = today.atStartOfDay(zone).toInstant().toEpochMilli()
 
         val records = notificationDao.recordsBetween(startMs, endMs)
         val data = DigestBuilder.summarise(records)
         val headline = digestService.summarise(data)
+
+        // Persisted before the permission-gated postDigest() below, and
+        // regardless of whether it succeeds: this is also the dedup stamp
+        // (see class KDoc), and it's the source for the Wall screen's digest
+        // card -- valuable in its own right when POST_NOTIFICATIONS is
+        // denied, since the card becomes the only place the user sees this.
+        digestStore.save(
+            PersistedDigest(
+                dateEpochDay = todayEpochDay,
+                headline = headline,
+                rang = data.rang,
+                silenced = data.silenced,
+                dropped = data.dropped,
+                topOffenderLabel = data.topOffender?.first,
+                topOffenderCount = data.topOffender?.second,
+                worthALook = data.worthALook,
+            ),
+        )
 
         postDigest(headline, data.worthALook)
         return Result.success()

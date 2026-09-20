@@ -2,6 +2,8 @@ package com.anuj.notificationfirewall.ui.wall
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.anuj.notificationfirewall.ai.DigestStore
+import com.anuj.notificationfirewall.ai.PersistedDigest
 import com.anuj.notificationfirewall.data.db.dao.NotificationDao
 import com.anuj.notificationfirewall.data.prefs.WallSettings
 import com.anuj.notificationfirewall.domain.wall.WallBucket
@@ -21,6 +23,9 @@ data class TodayCounts(val rang: Int = 0, val silenced: Int = 0, val dropped: In
     val total: Int get() = rang + silenced + dropped
 }
 
+/** How stale a persisted digest can be and still be worth showing on the Wall screen. */
+private const val DIGEST_CARD_MAX_AGE_DAYS = 1L
+
 data class WallUiState(
     val state: WallState = WallState.DISARMED,
     val counts: TodayCounts = TodayCounts(),
@@ -29,6 +34,13 @@ data class WallUiState(
      *  and the actual duration [WallViewModel.breakGlass] starts. */
     val breakGlassDurationMinutes: Int = 15,
     val loading: Boolean = true,
+    /**
+     * Null when no digest has ever been posted, or the last one is more than
+     * [DIGEST_CARD_MAX_AGE_DAYS] old -- an ancient digest shown without that
+     * age-out would read as current when the digest worker may simply not
+     * have run in a while (permission revoked, device off overnight, etc).
+     */
+    val digest: PersistedDigest? = null,
 )
 
 @HiltViewModel
@@ -37,6 +49,7 @@ class WallViewModel @Inject constructor(
     private val notificationDao: NotificationDao,
     private val breakGlassController: BreakGlassController,
     private val wallSettings: WallSettings,
+    private val digestStore: DigestStore,
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(WallUiState())
@@ -53,6 +66,7 @@ class WallViewModel @Inject constructor(
                     state = state,
                     breakGlassUntilMs = breakGlassController.activeUntilMs(),
                     breakGlassDurationMinutes = clampedBreakGlassMinutes(),
+                    digest = loadDigestIfFresh(),
                     loading = false,
                 )
             }
@@ -65,6 +79,7 @@ class WallViewModel @Inject constructor(
             state = arming.state(),
             breakGlassUntilMs = breakGlassController.activeUntilMs(),
             breakGlassDurationMinutes = clampedBreakGlassMinutes(),
+            digest = loadDigestIfFresh(),
             loading = false,
         )
         viewModelScope.launch { loadCounts() }
@@ -95,6 +110,18 @@ class WallViewModel @Inject constructor(
     fun cancelBreakGlass() {
         breakGlassController.cancel()
         refresh()
+    }
+
+    /**
+     * The persisted digest, but only if it's recent enough to still read as
+     * "today's/yesterday's summary" rather than stale data presented as
+     * current -- see [DIGEST_CARD_MAX_AGE_DAYS].
+     */
+    private fun loadDigestIfFresh(): PersistedDigest? {
+        val digest = digestStore.load() ?: return null
+        val todayEpochDay = LocalDate.now(ZoneId.systemDefault()).toEpochDay()
+        val ageDays = todayEpochDay - digest.dateEpochDay
+        return digest.takeIf { ageDays in 0..DIGEST_CARD_MAX_AGE_DAYS }
     }
 
     private suspend fun loadCounts() {
