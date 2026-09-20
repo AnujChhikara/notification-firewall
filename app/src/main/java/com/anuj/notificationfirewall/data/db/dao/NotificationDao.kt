@@ -146,4 +146,12 @@ interface NotificationDao {
     /** Notifications this app's current classifier judged — the correction-rate denominator. */
     @Query("SELECT COUNT(*) FROM notifications WHERE decisionSource IN ('JEV', 'CACHE')")
     suspend fun countJudgedByThisApp(): Int
+
+    /** Total rows currently stored — the Data section's "N notifications" line. */
+    @Query("SELECT COUNT(*) FROM notifications")
+    suspend fun totalCount(): Int
+
+    /** Wipes the entire history table. Used by "Delete all history" — irreversible. */
+    @Query("DELETE FROM notifications")
+    suspend fun deleteAll(): Int
 }

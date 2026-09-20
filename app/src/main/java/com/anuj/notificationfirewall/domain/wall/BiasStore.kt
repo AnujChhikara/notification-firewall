@@ -2,6 +2,7 @@ package com.anuj.notificationfirewall.domain.wall
 
 import com.anuj.notificationfirewall.data.db.SenderBiasEntity
 import com.anuj.notificationfirewall.data.db.dao.SenderBiasDao
+import kotlinx.coroutines.flow.Flow
 
 /** Which way the user said the wall got it wrong. */
 enum class Correction { SHOULD_HAVE_RUNG, SHOULD_HAVE_BEEN_SILENT }
@@ -53,6 +54,12 @@ class BiasStore(
     }
 
     suspend fun clear(pkg: String, sender: String) = dao.clear(pkg, sender)
+
+    /** Every sender the wall has learned a bias for, for the Settings screen's list. */
+    fun observeAll(): Flow<List<SenderBiasEntity>> = dao.observeAll()
+
+    /** Wipes every learned bias. Undoable only by re-earning the corrections. */
+    suspend fun clearAll() = dao.clearAll()
 
     /**
      * Overwrites the bias with an exact snapshot value.

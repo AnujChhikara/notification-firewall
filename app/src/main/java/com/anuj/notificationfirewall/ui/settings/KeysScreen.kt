@@ -36,13 +36,8 @@ import com.anuj.notificationfirewall.ui.NfButton
 import com.anuj.notificationfirewall.ui.NfCard
 import com.anuj.notificationfirewall.ui.SectionLabel
 import com.anuj.notificationfirewall.ui.NfScreen
-import com.anuj.notificationfirewall.ui.theme.NfAccent
-import com.anuj.notificationfirewall.ui.theme.NfBorder
-import com.anuj.notificationfirewall.ui.theme.NfDanger
-import com.anuj.notificationfirewall.ui.theme.NfRang
-import com.anuj.notificationfirewall.ui.theme.NfTextFaint
-import com.anuj.notificationfirewall.ui.theme.NfTextMuted
-import com.anuj.notificationfirewall.ui.theme.NfTitle
+import com.anuj.notificationfirewall.ui.theme.LocalWallColors
+import com.anuj.notificationfirewall.ui.theme.WallColors
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.launch
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -114,6 +109,7 @@ private sealed interface TestOutcome {
 @Composable
 fun KeysScreen(nav: NavHostController, vm: KeysViewModel = hiltViewModel()) {
     val scope = rememberCoroutineScope()
+    val c = LocalWallColors.current
 
     var jevKeyField by remember { mutableStateOf("") }
     var jevKeyEdited by remember { mutableStateOf(false) }
@@ -146,13 +142,13 @@ fun KeysScreen(nav: NavHostController, vm: KeysViewModel = hiltViewModel()) {
                         "The wall cannot classify notifications without this key. " +
                             "It's stored encrypted on-device and sent only to api.typesafe.ai.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = NfTextMuted,
+                        color = c.textMuted,
                     )
                     if (jevPreview != null && !jevKeyEdited) {
                         Text(
                             "Stored: $jevPreview",
                             style = MaterialTheme.typography.labelMedium,
-                            color = NfTextMuted,
+                            color = c.textMuted,
                         )
                     }
                     OutlinedTextField(
@@ -167,7 +163,7 @@ fun KeysScreen(nav: NavHostController, vm: KeysViewModel = hiltViewModel()) {
                         placeholder = { Text(jevPreview ?: "Paste key…") },
                         singleLine = true,
                         visualTransformation = if (jevKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                        colors = nfFieldColors(),
+                        colors = nfFieldColors(c),
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -199,7 +195,7 @@ fun KeysScreen(nav: NavHostController, vm: KeysViewModel = hiltViewModel()) {
                             "Saved. Restart the app for the new key to reach the live classifier — " +
                                 "it's read once when the app process starts.",
                             style = MaterialTheme.typography.labelMedium,
-                            color = NfRang,
+                            color = c.bucketRang,
                         )
                     }
 
@@ -227,12 +223,12 @@ fun KeysScreen(nav: NavHostController, vm: KeysViewModel = hiltViewModel()) {
                         is TestOutcome.Success -> Text(
                             "Round trip worked — importance score ${String.format(Locale.ROOT, "%.1f", outcome.importance)}",
                             style = MaterialTheme.typography.labelMedium,
-                            color = NfRang,
+                            color = c.bucketRang,
                         )
                         is TestOutcome.Failure -> Text(
                             outcome.message,
                             style = MaterialTheme.typography.labelMedium,
-                            color = NfDanger,
+                            color = c.danger,
                         )
                         null -> Unit
                     }
@@ -246,13 +242,13 @@ fun KeysScreen(nav: NavHostController, vm: KeysViewModel = hiltViewModel()) {
                         "Nothing uses this yet — it's stored for a future \"ask your data\" " +
                             "feature. You can skip this for now.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = NfTextMuted,
+                        color = c.textMuted,
                     )
                     if (openAiPreview != null && !openAiKeyEdited) {
                         Text(
                             "Stored: $openAiPreview",
                             style = MaterialTheme.typography.labelMedium,
-                            color = NfTextMuted,
+                            color = c.textMuted,
                         )
                     }
                     OutlinedTextField(
@@ -266,7 +262,7 @@ fun KeysScreen(nav: NavHostController, vm: KeysViewModel = hiltViewModel()) {
                         placeholder = { Text(openAiPreview ?: "sk-… (optional)") },
                         singleLine = true,
                         visualTransformation = if (openAiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                        colors = nfFieldColors(),
+                        colors = nfFieldColors(c),
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -293,7 +289,7 @@ fun KeysScreen(nav: NavHostController, vm: KeysViewModel = hiltViewModel()) {
                         )
                     }
                     if (openAiKeySaved) {
-                        Text("Saved", style = MaterialTheme.typography.labelMedium, color = NfRang)
+                        Text("Saved", style = MaterialTheme.typography.labelMedium, color = c.bucketRang)
                     }
                 }
             }
@@ -302,14 +298,14 @@ fun KeysScreen(nav: NavHostController, vm: KeysViewModel = hiltViewModel()) {
 }
 
 @Composable
-private fun nfFieldColors() = TextFieldDefaults.colors(
+private fun nfFieldColors(c: WallColors) = TextFieldDefaults.colors(
     focusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
     unfocusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
-    focusedIndicatorColor = NfAccent,
-    unfocusedIndicatorColor = NfBorder,
-    focusedTextColor = NfTitle,
-    unfocusedTextColor = com.anuj.notificationfirewall.ui.theme.NfText,
-    cursorColor = NfAccent,
-    focusedLabelColor = NfTextMuted,
-    unfocusedLabelColor = NfTextFaint,
+    focusedIndicatorColor = c.accent,
+    unfocusedIndicatorColor = c.border,
+    focusedTextColor = c.title,
+    unfocusedTextColor = c.text,
+    cursorColor = c.accent,
+    focusedLabelColor = c.textMuted,
+    unfocusedLabelColor = c.textFaint,
 )

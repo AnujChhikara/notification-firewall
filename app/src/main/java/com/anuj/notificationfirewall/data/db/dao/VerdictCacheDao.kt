@@ -33,4 +33,9 @@ interface VerdictCacheDao {
 
     @Query("SELECT COUNT(*) FROM verdict_cache")
     suspend fun count(): Int
+
+    /** Wipes every cached verdict. Used by "Empty cache" — safe, self-healing:
+     *  a fresh Jev call simply repopulates whatever is asked for again. */
+    @Query("DELETE FROM verdict_cache")
+    suspend fun clearAll()
 }

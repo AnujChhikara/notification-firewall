@@ -33,13 +33,31 @@ class WallSettings(private val prefs: SharedPreferences) {
         }.getOrDefault(ThemeMode.SYSTEM)
         set(value) = prefs.edit { putString(KEY_THEME_MODE, value.name) }
 
+    /**
+     * When the daily digest fires, as minutes since midnight (0–1439).
+     * Nothing schedules against this yet (see [com.anuj.notificationfirewall.work.DigestScheduler]) —
+     * Settings owns the knob, a later task wires the trigger to it.
+     */
+    var digestTimeMinuteOfDay: Int
+        get() = prefs.getInt(KEY_DIGEST_TIME_MINUTE, DEFAULT_DIGEST_TIME_MINUTE)
+        set(value) = prefs.edit { putInt(KEY_DIGEST_TIME_MINUTE, value.coerceIn(0, 1439)) }
+
+    /** How long a break-glass window stays open once triggered, in minutes. */
+    var breakGlassDurationMinutes: Int
+        get() = prefs.getInt(KEY_BREAK_GLASS_MINUTES, DEFAULT_BREAK_GLASS_MINUTES)
+        set(value) = prefs.edit { putInt(KEY_BREAK_GLASS_MINUTES, value.coerceIn(1, 120)) }
+
     private companion object {
         const val KEY_THRESHOLD = "wall_threshold"
         const val KEY_OTP_FAST_PATH = "wall_otp_fast_path"
         const val KEY_TEXT_RETENTION_DAYS = "wall_text_retention_days"
         const val KEY_JEV_API_KEY = "jev_api_key"
         const val KEY_THEME_MODE = "wall_theme_mode"
+        const val KEY_DIGEST_TIME_MINUTE = "wall_digest_time_minute"
+        const val KEY_BREAK_GLASS_MINUTES = "wall_break_glass_minutes"
         const val DEFAULT_THRESHOLD = 4.0f
         const val DEFAULT_TEXT_RETENTION_DAYS = 30
+        const val DEFAULT_DIGEST_TIME_MINUTE = 21 * 60 // 9:00 PM
+        const val DEFAULT_BREAK_GLASS_MINUTES = 15
     }
 }

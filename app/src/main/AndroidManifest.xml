@@ -34,6 +34,18 @@
     <!-- Reliability: re-arm the schedule and re-assert state after a reboot. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <!-- Package visibility (API 30+): without this, PackageManager silently
+         filters queryIntentActivities()/getInstalledApplications() down to
+         almost nothing, and the Settings "add app" picker for the VIP/block
+         lists would show an empty list on a real device instead of the
+         user's installed apps. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
     <application
         android:name=".NfApplication"
         android:allowBackup="false"

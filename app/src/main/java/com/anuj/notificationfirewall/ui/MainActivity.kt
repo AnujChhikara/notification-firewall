@@ -104,7 +104,7 @@ class MainActivity : ComponentActivity() {
                     enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
                 }
                 Surface(Modifier.fillMaxSize(), color = colors.background) {
-                    NfApp()
+                    NfApp(themeViewModel = themeViewModel)
                 }
             }
         }
@@ -113,6 +113,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun NfApp(
+    themeViewModel: ThemeViewModel,
     mainViewModel: MainViewModel = hiltViewModel(),
 ) {
     val nav = rememberNavController()
@@ -120,7 +121,7 @@ private fun NfApp(
     val route = currentRoute?.destination?.route
 
     Box(Modifier.fillMaxSize()) {
-        NfNavGraph(nav, mainViewModel.startDestination)
+        NfNavGraph(nav, mainViewModel.startDestination, themeViewModel)
         if (route in Routes.primary) {
             NfBottomBar(
                 currentRoute = route,
@@ -140,13 +141,13 @@ private fun NfApp(
 }
 
 @Composable
-private fun NfNavGraph(nav: NavHostController, startDestination: String) {
+private fun NfNavGraph(nav: NavHostController, startDestination: String, themeViewModel: ThemeViewModel) {
     NavHost(navController = nav, startDestination = startDestination) {
         composable(Routes.ONBOARDING) { OnboardingScreen(nav) }
         composable(Routes.WALL) { WallScreen(nav) }
         composable(Routes.INBOX) { InboxScreen(nav) }
         composable(Routes.ASK) { AskScreen(nav) }
-        composable(Routes.SETTINGS) { SettingsScreen(nav) }
+        composable(Routes.SETTINGS) { SettingsScreen(nav, themeViewModel) }
         composable(Routes.KEYS) { KeysScreen(nav) }
     }
 }

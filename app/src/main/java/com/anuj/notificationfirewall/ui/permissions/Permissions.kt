@@ -84,6 +84,12 @@ object Permissions {
     fun notificationAccessIntent(): Intent =
         Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
 
+    /** This app's generic details page — used for grants with no dedicated
+     *  settings screen of their own, such as the contacts permission. */
+    fun appDetailsSettingsIntent(context: Context): Intent =
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+            .setData(Uri.parse("package:${context.packageName}"))
+
     fun dndAccessIntent(): Intent =
         Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)
 

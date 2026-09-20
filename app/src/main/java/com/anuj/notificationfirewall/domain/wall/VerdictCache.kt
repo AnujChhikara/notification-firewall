@@ -86,4 +86,10 @@ class VerdictCache(
 
     suspend fun evictStale(maxAgeDays: Long): Int =
         dao.evictUnusedSince(clock() - maxAgeDays * 24 * 60 * 60 * 1000)
+
+    /** How many verdicts are currently cached — the Settings screen's "cache size". */
+    suspend fun count(): Int = dao.count()
+
+    /** Wipes the whole cache. Safe: a fresh Jev call simply repopulates it. */
+    suspend fun clearAll() = dao.clearAll()
 }
