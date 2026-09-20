@@ -175,6 +175,17 @@ class RawQueryDao(private val db: NfDatabase) {
         private val JOIN_MARKER_LINE =
             Regex("""^(?:LEFT-JOIN|RIGHT-JOIN)\s+(.+)$""", RegexOption.IGNORE_CASE)
 
+        /**
+         * `USING ROWID SEARCH ON TABLE <t> FOR IN-OPERATOR` names a real table,
+         * so it resolves like a SCAN. Its sibling `USING INDEX <i> FOR
+         * IN-OPERATOR` names an index and is structural — putting this one in
+         * with it would have been the fail-open choice.
+         */
+        private val ROWID_IN_LINE = Regex(
+            """^USING ROWID SEARCH ON TABLE\s+(.+?)\s+FOR IN-OPERATOR$""",
+            RegexOption.IGNORE_CASE,
+        )
+
         /** SQLite >= 3.36 names an unaliased derived table `(subquery-N)`. */
         private val SUBQUERY_HEAD = Regex("""^\(subquery-\d+\)$""", RegexOption.IGNORE_CASE)
 
@@ -213,7 +224,15 @@ class RawQueryDao(private val db: NfDatabase) {
             ),
             Regex("""^MULTI-INDEX OR$""", RegexOption.IGNORE_CASE),
             Regex("""^INDEX \d+$""", RegexOption.IGNORE_CASE),
-            Regex("""^(?:LEFT-JOIN|RIGHT-JOIN|BLOCKED BY .+)$""", RegexOption.IGNORE_CASE),
+            Regex("""^(?:LEFT-JOIN|RIGHT-JOIN)$""", RegexOption.IGNORE_CASE),
+            // Emitted whenever an IN/NOT IN subquery is served by an index on
+            // the right-hand side rather than driving a loop -- which is most
+            // of the time once the IN sits beside another WHERE term, or in a
+            // projection or HAVING. Names an index, not a table.
+            Regex("""^USING INDEX .+ FOR IN-OPERATOR$""", RegexOption.IGNORE_CASE),
+            // Present in the SQLite binary; the reviewer could not force either
+            // to emit. Handled now rather than discovered later on a device.
+            Regex("""^REUSE (?:LIST )?SUBQUERY \d+$""", RegexOption.IGNORE_CASE),
             // SQLite >= 3.38 emits this alongside a LIST SUBQUERY plan, which
             // is what `IN (SELECT …)` compiles to -- i.e. for a query shape the
             // validator explicitly permits. It names no table: the filter is
@@ -288,17 +307,28 @@ class RawQueryDao(private val db: NfDatabase) {
             // bound by no `FROM <identifier>`, so without this a shape the
             // validator explicitly permits would be refused here.
             //
-            // Binding these cannot loosen the check. A group is only walked
-            // when it opens with SELECT -- a parenthesised join clause is
-            // rejected outright, exactly as SqlValidator rejects it -- and a
-            // subquery introduces no table of its own: every table it reads
-            // appears as its own `FROM <identifier>` in this same string and is
-            // allow-listed by the loop above, or else surfaces as its own plan
-            // line and is checked there. The alias inherits that check; it
-            // never substitutes for it.
+            // Binding these cannot loosen the check, for two reasons that both
+            // have to hold.
+            //
+            // First, the group must genuinely be a subquery, which is
+            // [SqlValidator.parenGroupIsSubquery]'s question and not one this
+            // class answers for itself. An earlier revision of this file
+            // answered it with a local copy of that walk that had dropped the
+            // validator's top-level-comma check on each wrapping group, and
+            // the copy accepted `FROM ((SELECT 1), android_metadata q) q`: a
+            // parenthesised join clause wearing a subquery's hat, whose second
+            // branch is an entirely unvetted table. It bound `q`, and SQLite's
+            // `SCAN q` then resolved. Calling the shared implementation is what
+            // closes that; see the KDoc there.
+            //
+            // Second, a subquery introduces no table of its own: every table it
+            // reads appears as its own `FROM <identifier>` in this same string
+            // and is allow-listed by the loop above, or else surfaces as its own
+            // plan line and is checked there. So the alias inherits the table
+            // check; it never substitutes for it.
             for (match in FROM_OR_JOIN_PAREN.findAll(masked)) {
                 val open = match.range.last
-                if (!groupOpensWithSelect(masked, open)) {
+                if (!SqlValidator.parenGroupIsSubquery(masked, open)) {
                     throw UnsafeQueryException(
                         "A parenthesised join clause is not supported after FROM/JOIN; " +
                             "only a subquery is permitted",
@@ -313,26 +343,6 @@ class RawQueryDao(private val db: NfDatabase) {
 
             if (names.isEmpty()) throw UnsafeQueryException("The statement names no table to read")
             return names
-        }
-
-        /**
-         * Does the group opened at [openParenIdx] begin with SELECT — i.e. is
-         * it an ordinary subquery rather than a parenthesised join clause?
-         * Redundant wrapping parens are walked through, as SQLite allows
-         * `((SELECT …))`. Iterative: the nesting depth is attacker-chosen.
-         */
-        private fun groupOpensWithSelect(masked: String, openParenIdx: Int): Boolean {
-            var open = openParenIdx
-            while (true) {
-                var i = open + 1
-                while (i < masked.length && masked[i].isWhitespace()) i++
-                if (i >= masked.length) return false
-                if (masked[i] != '(') {
-                    return masked.regionMatches(i, "select", 0, 6, ignoreCase = true) &&
-                        (i + 6 >= masked.length || !masked[i + 6].isLetterOrDigit())
-                }
-                open = i
-            }
         }
 
         /** Index of the `)` closing the group opened at [openParenIdx], or null. */
@@ -370,6 +380,7 @@ class RawQueryDao(private val db: NfDatabase) {
             val target = SCAN_LINE.find(line)?.groupValues?.get(1)
                 ?: BLOOM_LINE.find(line)?.groupValues?.get(1)
                 ?: JOIN_MARKER_LINE.find(line)?.groupValues?.get(1)
+                ?: ROWID_IN_LINE.find(line)?.groupValues?.get(1)
             if (target != null) {
                 val name = planTargetName(target, line)
                 if (name != null && name.lowercase() !in resolvable) {

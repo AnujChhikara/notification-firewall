@@ -309,6 +309,18 @@ class RawQueryDaoTest {
                 "WHERE decisionSource IN ('JEV', 'CACHE') GROUP BY category ORDER BY c DESC LIMIT 20",
             "SELECT x.a FROM (SELECT packageName AS a, COUNT(*) AS n FROM notifications " +
                 "GROUP BY packageName) x LIMIT 5",
+            // The IN shapes that emit USING INDEX … FOR IN-OPERATOR on a modern
+            // SQLite: beside another WHERE term, negated, in the projection,
+            // and in HAVING.
+            "SELECT COUNT(*) AS c FROM notifications WHERE timestampEpochMs > 0 " +
+                "AND packageName IN (SELECT packageName FROM overrides) LIMIT 1",
+            "SELECT appLabel, COUNT(*) AS c FROM notifications " +
+                "WHERE packageName NOT IN (SELECT packageName FROM overrides) " +
+                "GROUP BY appLabel LIMIT 20",
+            "SELECT packageName IN (SELECT packageName FROM overrides) AS vip, " +
+                "COUNT(*) AS c FROM notifications GROUP BY vip LIMIT 20",
+            "SELECT packageName, COUNT(*) AS c FROM notifications GROUP BY packageName " +
+                "HAVING packageName IN (SELECT packageName FROM overrides) LIMIT 20",
         )
         queries.forEach { sql ->
             assertTrue(sql, SqlValidator.validate(sql, allowContent = false) is SqlVerdict.Allowed)
@@ -509,6 +521,24 @@ class RawQueryDaoTest {
     }
 
     @Test
+    fun aWrappedParenthesisedJoinClauseCannotBindAnAlias() {
+        // SQLite's `table-or-subquery := ( join-clause )` wearing a subquery's
+        // hat: the wrapper's first token is `(`, and the group inside it does
+        // start with SELECT -- but the comma at the WRAPPER's own top level is
+        // joining a second, unvetted table to it. SQLite reads the real
+        // android_metadata and prints `SCAN q`.
+        try {
+            RawQueryDao.assertPlanIsAttributable(
+                "SELECT q.locale AS v FROM ((SELECT 1 AS z), android_metadata q) q LIMIT 1",
+                listOf("SCAN q"),
+            )
+            fail("a parenthesised join clause must not bind an alias, however it is wrapped")
+        } catch (e: UnsafeQueryException) {
+            assertTrue(e.message!!, e.message!!.contains("parenthesised join clause"))
+        }
+    }
+
+    @Test
     fun aJoinMarkerLineMustStillNameSomethingKnown() {
         // LEFT-JOIN/RIGHT-JOIN lines name a table, so they resolve like a SCAN
         // rather than being waved through as structural.
@@ -544,8 +574,36 @@ class RawQueryDaoTest {
             "INDEX 1",
             "LEFT-JOIN",
             "RIGHT-JOIN",
+            "USING INDEX index_notifications_packageName FOR IN-OPERATOR",
+            "USING INDEX sqlite_autoindex_overrides_1 FOR IN-OPERATOR",
+            "REUSE LIST SUBQUERY 1",
+            "REUSE SUBQUERY 1",
         ).forEach { line ->
             RawQueryDao.assertPlanIsAttributable(derivedTableSql, listOf("SCAN x", line))
+        }
+    }
+
+    @Test
+    fun theRowidInOperatorLineNamesATableAndMustResolve() {
+        // `USING ROWID SEARCH ON TABLE t FOR IN-OPERATOR` (for `WHERE id IN
+        // (SELECT id FROM overrides)`) names a real table. Treating it as
+        // structural alongside its index-naming sibling would have been the
+        // fail-open fix.
+        RawQueryDao.assertPlanIsAttributable(
+            inSubquerySql,
+            listOf("SCAN notifications", "USING ROWID SEARCH ON TABLE overrides FOR IN-OPERATOR"),
+        )
+        try {
+            RawQueryDao.assertPlanIsAttributable(
+                inSubquerySql,
+                listOf(
+                    "SCAN notifications",
+                    "USING ROWID SEARCH ON TABLE android_metadata FOR IN-OPERATOR",
+                ),
+            )
+            fail("a rowid IN-operator search over an unlisted table must be rejected")
+        } catch (e: UnsafeQueryException) {
+            assertTrue(e.message!!, e.message!!.contains("android_metadata"))
         }
     }
 

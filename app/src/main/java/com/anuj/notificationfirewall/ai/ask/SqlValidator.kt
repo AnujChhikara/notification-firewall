@@ -180,9 +180,14 @@ object SqlValidator {
         pos <= 0 || (!text[pos - 1].isLetterOrDigit() && text[pos - 1] != '_')
     private fun boundaryAfter(text: String, pos: Int) =
         pos >= text.length || (!text[pos].isLetterOrDigit() && text[pos] != '_')
+    // ignoreCase so this is usable on text that has not been lowercased. Every
+    // call inside this file passes already-lowercased text, where it is a
+    // no-op; RawQueryDao shares [parenGroupIsSubquery] and does not lowercase,
+    // because lowercasing is not length-preserving for all of Unicode and the
+    // paren walk is index-based.
     private fun keywordAt(text: String, pos: Int, word: String) =
         pos + word.length <= text.length &&
-            text.regionMatches(pos, word, 0, word.length) &&
+            text.regionMatches(pos, word, 0, word.length, ignoreCase = true) &&
             boundaryBefore(text, pos) &&
             boundaryAfter(text, pos + word.length)
 
@@ -289,8 +294,19 @@ object SqlValidator {
      * are its own projection's.
      *
      * Iterative rather than recursive: the nesting depth is attacker-chosen.
+     *
+     * SHARED, deliberately. [com.anuj.notificationfirewall.data.db.dao.RawQueryDao]
+     * needs exactly this question when it decides whether a `FROM (`/`JOIN (`
+     * group may bind an alias, and a review round found that its own copy of
+     * this walk -- which had dropped the [hasTopLevelCommaInGroup] call above
+     * -- accepted `FROM ((SELECT 1), android_metadata q) q` and bound `q`,
+     * re-opening the very bypass the comma check was added to close. The two
+     * gates stay independent in *what* they check -- the validator reads the
+     * statement, the DAO reads SQLite's own query plan -- but this is a purely
+     * syntactic utility with a hard-won correct implementation, and there must
+     * be exactly one of it. Do not copy this method; call it.
      */
-    private fun parenGroupIsSubquery(masked: String, openParenIdx: Int): Boolean {
+    internal fun parenGroupIsSubquery(masked: String, openParenIdx: Int): Boolean {
         var open = openParenIdx
         while (true) {
             var idx = open + 1
