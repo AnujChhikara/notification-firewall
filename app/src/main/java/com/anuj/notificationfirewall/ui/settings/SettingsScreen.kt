@@ -112,6 +112,7 @@ fun SettingsScreen(nav: NavHostController, themeViewModel: ThemeViewModel) {
             SectionLabel("Always ring")
             OverrideListCard(
                 rows = ui.vipList,
+                retentionDays = ui.textRetentionDays,
                 emptyHint = "No one is on the VIP list yet.",
                 onAdd = { pickerFor = OverrideKind.VIP },
                 onRemove = { vm.removeOverride(it, OverrideKind.VIP) },
@@ -120,6 +121,7 @@ fun SettingsScreen(nav: NavHostController, themeViewModel: ThemeViewModel) {
             SectionLabel("Never show")
             OverrideListCard(
                 rows = ui.blockList,
+                retentionDays = ui.textRetentionDays,
                 emptyHint = "Nothing is blocked yet.",
                 onAdd = { pickerFor = OverrideKind.BLOCK },
                 onRemove = { vm.removeOverride(it, OverrideKind.BLOCK) },
@@ -128,6 +130,7 @@ fun SettingsScreen(nav: NavHostController, themeViewModel: ThemeViewModel) {
             SectionLabel("Learned corrections")
             LearnedCorrectionsCard(
                 rows = ui.learnedSenders,
+                retentionDays = ui.textRetentionDays,
                 onClear = vm::clearBias,
                 onResetAll = { resetLearningConfirm = true },
             )
@@ -246,11 +249,15 @@ private fun SensitivityCard(ui: SettingsUiState, onChange: (Float) -> Unit) {
 @Composable
 private fun OverrideListCard(
     rows: List<OverrideRow>,
+    retentionDays: Int,
     emptyHint: String,
     onAdd: () -> Unit,
     onRemove: (OverrideRow) -> Unit,
 ) {
     val c = LocalWallColors.current
+    // Read once per composition, not per row: a stable "now" keeps every row
+    // in the list judged against the same cutoff.
+    val now = remember(rows, retentionDays) { System.currentTimeMillis() }
     NfCard {
         Column(Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
             if (rows.isEmpty()) {
@@ -276,7 +283,11 @@ private fun OverrideListCard(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
-                                Text(row.label, style = MaterialTheme.typography.titleMedium, color = c.text)
+                                Text(
+                                    row.displayLabel(retentionDays, now),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = c.text,
+                                )
                                 if (row.fromInbox) {
                                     NfChip(text = "from inbox", selected = false, onClick = {})
                                 }
@@ -296,10 +307,12 @@ private fun OverrideListCard(
 @Composable
 private fun LearnedCorrectionsCard(
     rows: List<LearnedSenderRow>,
+    retentionDays: Int,
     onClear: (LearnedSenderRow) -> Unit,
     onResetAll: () -> Unit,
 ) {
     val c = LocalWallColors.current
+    val now = remember(rows, retentionDays) { System.currentTimeMillis() }
     NfCard {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
@@ -314,7 +327,11 @@ private fun LearnedCorrectionsCard(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text(row.senderKey, style = MaterialTheme.typography.titleMedium, color = c.text)
+                        Text(
+                            row.displayLabel(retentionDays, now),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = c.text,
+                        )
                         Text(row.packageName, style = MaterialTheme.typography.bodySmall, color = c.textFaint)
                     }
                     Text(

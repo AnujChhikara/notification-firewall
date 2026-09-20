@@ -45,7 +45,31 @@ data class InboxRow(
     val explanation: String,
     val packageName: String,
     val contentShape: String,
-)
+    /**
+     * When retention purged this row's text, or null if it still has it.
+     * Carried on the row because [sender] cannot be nulled for a purged
+     * record -- it is the correction/eviction scope key -- so the *display*
+     * name has to be guarded separately. See [displayName].
+     */
+    val textPurgedAt: Long? = null,
+) {
+    /**
+     * What any surface may put on screen for this row's sender.
+     *
+     * Never [sender] once [textPurgedAt] is set. Retention nulls `title` and
+     * `text` but deliberately leaves `senderKey` populated (see
+     * `NotificationDao.purgeTextBefore`), and `senderKey` is a verbatim copy
+     * of the title (`NotificationMapper.kt`: `val senderKey = title`) -- so a
+     * purged row still carries its original title in [sender]. Rendering it
+     * printed the title as the row's headline directly above a body reading
+     * "Content expired", which is both a lie and exactly the content
+     * retention promised to remove. This is the same guard
+     * `DigestBuilder.renderWorthALookLine` applies, for the same reason:
+     * checking `title == null` alone is not enough.
+     */
+    val displayName: String
+        get() = if (textPurgedAt != null) appLabel else sender ?: appLabel
+}
 
 @HiltViewModel
 class InboxViewModel @Inject constructor(
@@ -103,7 +127,7 @@ class InboxViewModel @Inject constructor(
                 kind = kind,
                 pkg = row.packageName,
                 sender = row.sender,
-                label = row.sender ?: row.appLabel,
+                label = row.displayName,
                 source = OverrideSource.SWIPE,
             )
         }
@@ -124,6 +148,7 @@ class InboxViewModel @Inject constructor(
         text = text,
         timestampMs = timestampEpochMs,
         contentShape = contentShape,
+        textPurgedAt = textPurgedAt,
         bucket = bucket,
         source = decisionSource,
         importance = importanceScore,

@@ -58,6 +58,33 @@ object ThresholdMath {
     }
 }
 
+/**
+ * What a Settings list shows in place of a sender name whose source text is
+ * past the user's retention window. See [sourceTextExpired].
+ */
+const val EXPIRED_SENDER_LABEL = "(sender expired)"
+
+private const val MS_PER_DAY = 24L * 60 * 60 * 1000
+
+/**
+ * True when an entry last touched at [entryEpochMs] is old enough that
+ * retention has already purged the notification text it was derived from.
+ *
+ * `overrides` and `sender_bias` are never purged by anything -- deliberately,
+ * because `senderKey` is the scoping key for corrections and nulling it would
+ * silently re-scope or orphan a user's own rules. But a swipe-created entry's
+ * *display* string is a verbatim copy of a notification title
+ * (`NotificationMapper.kt`: `val senderKey = title`), so leaving it on screen
+ * means titles outlive the retention setting indefinitely, and even survive
+ * "Delete all history". Rendering is where that is fixed: the key stays in
+ * the database doing its job, and the screen stops showing it once the same
+ * cutoff that purged `notifications` has passed.
+ *
+ * Retention of 0 means "never purge", so nothing ever expires.
+ */
+fun sourceTextExpired(entryEpochMs: Long, retentionDays: Int, nowMs: Long): Boolean =
+    retentionDays > 0 && entryEpochMs < nowMs - retentionDays * MS_PER_DAY
+
 /** One row of the VIP or block list. [fromInbox] marks an entry that accumulated
  *  from a swipe rather than one the user typed in here deliberately. */
 data class OverrideRow(
@@ -66,7 +93,20 @@ data class OverrideRow(
     val senderKey: String?,
     val label: String,
     val fromInbox: Boolean,
-)
+    val createdAtEpochMs: Long = 0,
+) {
+    /**
+     * The label to render. An entry the user typed in here has an app label
+     * for its [label] and is left alone; only a swipe-created, sender-scoped
+     * entry carries title text, and only that one expires.
+     */
+    fun displayLabel(retentionDays: Int, nowMs: Long): String =
+        if (fromInbox && senderKey != null && sourceTextExpired(createdAtEpochMs, retentionDays, nowMs)) {
+            EXPIRED_SENDER_LABEL
+        } else {
+            label
+        }
+}
 
 private fun OverrideEntity.toRow() = OverrideRow(
     id = id,
@@ -74,12 +114,22 @@ private fun OverrideEntity.toRow() = OverrideRow(
     senderKey = senderKey,
     label = label,
     fromInbox = source == OverrideSource.SWIPE,
+    createdAtEpochMs = createdAtEpochMs,
 )
 
 /** One sender the wall has learned a nudge for. */
-data class LearnedSenderRow(val packageName: String, val senderKey: String, val bias: Float)
+data class LearnedSenderRow(
+    val packageName: String,
+    val senderKey: String,
+    val bias: Float,
+    val lastCorrectedEpochMs: Long = 0,
+) {
+    /** Every sender_bias key is title-derived, so every row here can expire. */
+    fun displayLabel(retentionDays: Int, nowMs: Long): String =
+        if (sourceTextExpired(lastCorrectedEpochMs, retentionDays, nowMs)) EXPIRED_SENDER_LABEL else senderKey
+}
 
-private fun SenderBiasEntity.toRow() = LearnedSenderRow(packageName, senderKey, bias)
+private fun SenderBiasEntity.toRow() = LearnedSenderRow(packageName, senderKey, bias, lastCorrectedEpochMs)
 
 /** One installed, launchable app — the app-picker's option list. */
 data class InstalledApp(val packageName: String, val label: String)

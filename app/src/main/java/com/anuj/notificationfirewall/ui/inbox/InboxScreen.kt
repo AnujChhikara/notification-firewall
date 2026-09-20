@@ -80,7 +80,7 @@ fun InboxScreen(nav: NavHostController) {
     // inverse correction" would move a bias the original action never
     // touched. The snapshot is taken before vm.correct() runs.
     fun correctWithUndo(row: InboxRow, correction: Correction) {
-        val label = row.sender ?: row.appLabel
+        val label = row.displayName
         val verdict = if (correction == Correction.SHOULD_HAVE_BEEN_SILENT) "more harshly" else "more kindly"
         scope.launch {
             val previousBias = vm.biasBefore(row)
@@ -193,7 +193,7 @@ private fun InboxRowItem(
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
                         Text(
-                            row.sender ?: row.appLabel,
+                            row.displayName,
                             style = MaterialTheme.typography.titleMedium,
                             color = c.text,
                         )
@@ -269,7 +269,7 @@ private fun InboxActionSheet(
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(bottom = 24.dp)) {
             Text(
-                row.sender ?: row.appLabel,
+                row.displayName,
                 style = MaterialTheme.typography.titleMedium,
                 color = c.title,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),

@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.app.Service
 import android.os.IBinder
+import android.util.Log
 import androidx.core.content.ContextCompat
 import com.anuj.notificationfirewall.R
 import com.anuj.notificationfirewall.ui.MainActivity
@@ -60,15 +61,29 @@ class KeepAliveService : Service() {
     companion object {
         private const val NOTIFICATION_ID = 7
 
-        /** Requests the service start; it self-checks arming and no-ops if disarmed. */
+        private const val TAG = "KeepAliveService"
+
+        /**
+         * Requests the service start; it self-checks arming and no-ops if disarmed.
+         *
+         * Failures are swallowed rather than thrown -- a start refused by the
+         * platform (typically `ForegroundServiceStartNotAllowedException` on a
+         * device without the battery-optimisation exemption) must not take
+         * down the caller, which is usually `MaintenanceWorker`. But it is
+         * logged: `MaintenanceWorker` is the only self-heal left for an
+         * OEM-killed keep-alive, so a silent failure here is a wall that
+         * quietly stops being pinned every 15 minutes with nothing to show
+         * for it in a bug report.
+         */
         fun start(context: Context) {
             runCatching {
                 ContextCompat.startForegroundService(context, Intent(context, KeepAliveService::class.java))
-            }
+            }.onFailure { Log.w(TAG, "Keep-alive start refused by the platform", it) }
         }
 
         fun stop(context: Context) {
             runCatching { context.stopService(Intent(context, KeepAliveService::class.java)) }
+                .onFailure { Log.w(TAG, "Keep-alive stop failed", it) }
         }
     }
 }

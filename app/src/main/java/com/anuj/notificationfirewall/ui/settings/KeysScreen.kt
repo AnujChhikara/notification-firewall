@@ -239,8 +239,18 @@ fun KeysScreen(nav: NavHostController, vm: KeysViewModel = hiltViewModel()) {
             NfCard {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
-                        "Nothing uses this yet — it's stored for a future \"ask your data\" " +
-                            "feature. You can skip this for now.",
+                        "Two things use this key: the Ask tab, which turns a typed " +
+                            "question into a query your phone runs, and the daily digest " +
+                            "sentence. Without it, the Ask tab's numbers still work and the " +
+                            "digest falls back to a locally written summary.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = c.textMuted,
+                    )
+                    Text(
+                        "What leaves the phone: your question, the table and column names, " +
+                            "and the counts your phone computed in reply — plus, for the " +
+                            "digest, the day's totals and the app label that interrupted you " +
+                            "most. Never a notification title, body or sender.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = c.textMuted,
                     )

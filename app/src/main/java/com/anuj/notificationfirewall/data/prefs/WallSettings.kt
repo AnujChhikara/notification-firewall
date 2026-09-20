@@ -46,9 +46,10 @@ class WallSettings(private val prefs: SharedPreferences) {
 
     /**
      * How long a break-glass window stays open once triggered, in minutes.
-     * Settings owns the knob; Task 9 (break-glass) is what reads it and
-     * actually opens/closes the window (nothing sets [breakGlassUntilMs] in
-     * [com.anuj.notificationfirewall.ui.wall.WallUiState] yet).
+     * Settings owns the knob;
+     * [com.anuj.notificationfirewall.service.BreakGlassController] reads it
+     * when opening a window and is what sets
+     * [com.anuj.notificationfirewall.ui.wall.WallUiState.breakGlassUntilMs].
      */
     var breakGlassDurationMinutes: Int
         get() = prefs.getInt(KEY_BREAK_GLASS_MINUTES, DEFAULT_BREAK_GLASS_MINUTES)

@@ -81,14 +81,17 @@ class InboxViewModelTest {
         shape: String = "shape1",
         bucket: WallBucket = WallBucket.SILENCE,
         source: WallDecisionSource = WallDecisionSource.JEV,
+        purgedAt: Long? = null,
     ) = db.notificationDao().insert(
         NotificationRecordEntity(
-            packageName = pkg, appLabel = "Myntra", title = "FLAT 70% OFF", text = "Shop now",
+            packageName = pkg, appLabel = "Myntra",
+            title = if (purgedAt == null) "FLAT 70% OFF" else null,
+            text = if (purgedAt == null) "Shop now" else null,
             timestampEpochMs = 1_700_000_000_000L, senderKey = sender, contentShape = shape,
             importanceScore = 1.4f, biasApplied = 0f, category = NotificationCategory.PROMOTION,
             isTimeSensitive = 0.1f, isFromHuman = 0.03f, needsAction = 0.05f,
             jevConfidence = 0.91f, decisionSource = source, bucket = bucket,
-            pendingClassification = false, textPurgedAt = null, isRead = false,
+            pendingClassification = false, textPurgedAt = purgedAt, isRead = false,
         ),
     )
 
@@ -244,4 +247,45 @@ class InboxViewModelTest {
             0.001f,
         )
     }
+
+    // --- Purged rows must never render their title -------------------------
+    //
+    // Retention nulls title/text but leaves senderKey populated, and senderKey
+    // is a verbatim copy of the title, so an unguarded row rendered the title
+    // as its headline directly above a body reading "Content expired".
+
+    @Test
+    fun purgedRowKeepsItsSenderKeyAsAScopeKeyButNeverDisplaysIt() = runTest {
+        insert(sender = "Mum", purgedAt = 1_700_000_500_000L)
+        val row = vm.rows.first().single()
+
+        assertEquals("Mum", row.sender)
+        assertEquals(1_700_000_500_000L, row.textPurgedAt)
+        assertEquals("Myntra", row.displayName)
+    }
+
+    @Test
+    fun unpurgedRowStillDisplaysItsSender() = runTest {
+        insert(sender = "Mum")
+        assertEquals("Mum", vm.rows.first().single().displayName)
+    }
+
+    @Test
+    fun rowWithNoSenderFallsBackToTheAppLabel() = runTest {
+        val row = row(1).copy(sender = null)
+        assertEquals("Myntra", row.displayName)
+    }
+
+    @Test
+    fun overrideCreatedFromAPurgedRowIsLabelledWithTheAppNotTheTitle() = runTest {
+        insert(sender = "Mum", purgedAt = 1_700_000_500_000L)
+        val row = vm.rows.first().single()
+        vm.addOverride(row, OverrideKind.VIP)
+
+        val stored = db.overrideDao().matching("com.myntra", "Mum").single()
+        assertEquals("Myntra", stored.label)
+        // The scope key is untouched: the override must still match this sender.
+        assertEquals("Mum", stored.senderKey)
+    }
+
 }
