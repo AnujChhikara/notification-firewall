@@ -1,5 +1,6 @@
 package com.anuj.notificationfirewall.ai.ask
 
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -1003,5 +1004,180 @@ class SqlValidatorTest {
             ),
         )
         assertTrue(allowed("SELECT packageName FROM notifications LIMIT 20"))
+    }
+
+    // ── Round 4: the scanner's idea of a keyword must match SQLite's ──────
+
+    // [hasCommaInAnyFromClause] ends each FROM occurrence's scan at a stop
+    // word, so matching *more* stop words than SQLite recognises is the one
+    // direction in which that scan fails open: it stops early and never sees
+    // the comma join behind the fake stop word. Two ways to manufacture one
+    // out of something SQLite reads as an ordinary table alias:
+    //
+    //   1. JVM case folding. `regionMatches(ignoreCase = true)` folds via
+    //      toUpperCase/toLowerCase, under which U+0131 (Turkish dotless i) and
+    //      U+0130 both equal `i`. `having` and `limit` each carry an `i`.
+    //      (Brute-forcing U+0080..U+FFFF finds exactly three such collisions:
+    //      U+0130/U+0131 with `i`, U+017F with `s`, U+212A with `k`.)
+    //   2. Word boundaries. SQLite's tokeniser treats every character at or
+    //      above U+0080, and `$`, as an identifier character; Java's
+    //      `Char.isLetterOrDigit()` does not, so `having«` read as the stop
+    //      word `having` followed by a boundary.
+    //
+    // Every statement below was run against a real SQLite (3.51) first: each
+    // parses, executes, and returns the unlisted table's row. They are
+    // reproductions, not hypotheticals.
+
+    @Test
+    fun aDotlessIHavingAliasCannotHideACommaJoin() {
+        rejectedBecause(
+            "SELECT locale FROM notifications hav\u0131ng, android_metadata LIMIT 1",
+            "Comma joins",
+        )
+    }
+
+    @Test
+    fun aDotlessIHavingAliasCannotHideACommaJoinToRoomMasterTable() {
+        rejectedBecause(
+            "SELECT identity_hash FROM notifications hav\u0131ng, room_master_table LIMIT 1",
+            "Comma joins",
+        )
+    }
+
+    @Test
+    fun aDotlessIHavingAliasCannotHideACommaJoinToSqliteSequence() {
+        rejectedBecause(
+            "SELECT seq FROM notifications hav\u0131ng, sqlite_sequence LIMIT 1",
+            "Comma joins",
+        )
+    }
+
+    @Test
+    fun anExplicitAsBeforeADotlessIHavingAliasIsNoBetter() {
+        rejectedBecause(
+            "SELECT locale FROM notifications AS hav\u0131ng, android_metadata LIMIT 1",
+            "Comma joins",
+        )
+    }
+
+    @Test
+    fun aDotlessILimitAliasCannotHideACommaJoin() {
+        // `limit` is the other stop word carrying an `i`. Note this one has no
+        // backstop from the LIMIT-count check: Kotlin's RegexOption.IGNORE_CASE
+        // is Pattern.CASE_INSENSITIVE *without* UNICODE_CASE (its flag value is
+        // 2), so `\blimit\b` never matches `l\u0131mit` and the statement still
+        // carries exactly one recognised LIMIT.
+        rejectedBecause(
+            "SELECT locale FROM notifications l\u0131mit, android_metadata LIMIT 1",
+            "Comma joins",
+        )
+    }
+
+    @Test
+    fun aDottedCapitalIHavingAliasCannotHideACommaJoin() {
+        // U+0130 collides with `i` the same way. Guard rather than a
+        // reproduction: lowercase() expands it to `i` + U+0307, so the stop
+        // word already failed to match. It must keep failing to match.
+        rejectedBecause(
+            "SELECT locale FROM notifications HAV\u0130NG, android_metadata LIMIT 1",
+            "Comma joins",
+        )
+    }
+
+    @Test
+    fun anIdentifierCharacterAfterAStopWordMeansItIsNotAStopWord() {
+        // SQLite reads `having\u00ab` as one identifier, so this is a comma join.
+        rejectedBecause(
+            "SELECT locale FROM notifications having\u00ab, android_metadata LIMIT 1",
+            "Comma joins",
+        )
+    }
+
+    @Test
+    fun aDollarSignIsAnIdentifierCharacterToSqliteToo() {
+        rejectedBecause(
+            "SELECT locale FROM notifications having\u0024, android_metadata LIMIT 1",
+            "Comma joins",
+        )
+    }
+
+    @Test
+    fun aNonBreakingSpaceIsAnIdentifierCharacterToSqliteNotWhitespace() {
+        rejectedBecause(
+            "SELECT locale FROM notifications having\u00a0, android_metadata LIMIT 1",
+            "Comma joins",
+        )
+    }
+
+    @Test
+    fun anIdentifierCharacterBeforeAStopWordMeansItIsNotAStopWordEither() {
+        rejectedBecause(
+            "SELECT locale FROM notifications \u00abhaving, android_metadata LIMIT 1",
+            "Comma joins",
+        )
+    }
+
+    @Test
+    fun everyClauseStopWordIsCheckedTheSameWay() {
+        // where/group/having/order/limit all end the scan, so all five need the
+        // boundary to agree with SQLite, not just the two carrying an `i`.
+        for (word in listOf("where", "group", "having", "order", "limit")) {
+            rejectedBecause(
+                "SELECT locale FROM notifications $word\u00b0, android_metadata LIMIT 1",
+                "Comma joins",
+            )
+        }
+    }
+
+    @Test
+    fun realStopWordsStillEndTheFromClauseScan() {
+        // The counterweight: tightening what counts as a stop word must not
+        // turn an ordinary GROUP BY / ORDER BY list into a phantom comma join.
+        assertTrue(
+            allowed(
+                "SELECT packageName, bucket, COUNT(*) AS c FROM notifications " +
+                    "GROUP BY packageName, bucket ORDER BY c DESC, bucket ASC LIMIT 20",
+            ),
+        )
+        assertTrue(
+            allowed(
+                "SELECT appLabel, COUNT(*) AS c FROM notifications " +
+                    "WHERE bucket IN ('RING', 'SILENCE') GROUP BY appLabel " +
+                    "HAVING c > 1 LIMIT 20",
+            ),
+        )
+    }
+
+    // ── The shared paren-group walk is a cross-gate contract ─────────────
+
+    // [SqlValidator.parenGroupIsSubquery] is internal because RawQueryDao --
+    // the *other* gate -- calls it, and calls it with the statement exactly as
+    // the model wrote it: never lowercased, because lowercase() is not
+    // length-preserving for all of Unicode and that walk is index-based. Until
+    // now only RawQueryDaoTest pinned that, so an edit here that "simplified"
+    // the walk for this file's own always-lowercased input could have broken
+    // the other gate silently. These three pin it as a shared utility.
+
+    @Test
+    fun theSharedParenGroupWalkAcceptsASubqueryInTextThatWasNeverLowercased() {
+        val sql = "SELECT c FROM (SELECT COUNT(*) AS c FROM notifications) x LIMIT 1"
+        assertTrue(SqlValidator.parenGroupIsSubquery(sql, sql.indexOf('(')))
+    }
+
+    @Test
+    fun theSharedParenGroupWalkStillRefusesAJoinClauseInNonLowercasedText() {
+        // The round-3 bypass, in the casing RawQueryDao actually receives.
+        val sql = "SELECT a FROM ((SELECT 1), android_metadata q) q LIMIT 1"
+        assertFalse(SqlValidator.parenGroupIsSubquery(sql, sql.indexOf('(')))
+    }
+
+    @Test
+    fun theSharedParenGroupWalkIsNotFooledByALongSInsteadOfAnS() {
+        // U+017F folds to `s` under the JVM's ignoreCase, so `\u017felect`
+        // used to satisfy the `select` test and bind an alias -- in the gate
+        // that does not lowercase, and so cannot be reasoned about as if it
+        // did. SQLite reads it as an identifier, not as SELECT.
+        val sql = "SELECT a FROM (\u017felect 1) x LIMIT 1"
+        assertFalse(SqlValidator.parenGroupIsSubquery(sql, sql.indexOf('(')))
     }
 }

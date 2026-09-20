@@ -176,18 +176,77 @@ object SqlValidator {
         return items
     }
 
+    /**
+     * SQLite's own definition of an identifier character — which is what
+     * decides whether a keyword this scanner thinks it sees is really a
+     * keyword, or merely part of a longer identifier.
+     *
+     * ASCII letters, digits, `_`, `$`, and every character at or above
+     * U+0080: SQLite's tokeniser treats any byte with the high bit set as an
+     * identifier byte, so `having«` is one identifier to it. Established by
+     * brute-forcing U+0001..U+02FF through a real SQLite (3.51) in both
+     * leading and trailing position, not by reading the source.
+     *
+     * `Char.isLetterOrDigit()` was the wrong question and was a bypass: it is
+     * false for `«`, `°`, `$` and NBSP, all of which SQLite accepts inside an
+     * identifier. So `FROM notifications having«, android_metadata` read as
+     * a `having` stop word here — ending [hasCommaInAnyFromClause]'s scan and
+     * hiding the comma join behind it — while SQLite read `having«` as an
+     * ordinary alias and executed the join. Counting *more* things as
+     * identifier characters can only shorten the set of keywords recognised,
+     * and every caller of [keywordAt] fails towards a rejection when a
+     * keyword is not recognised, so this direction cannot loosen the gate.
+     */
+    private fun isIdentifierChar(c: Char): Boolean =
+        c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9' ||
+            c == '_' || c == '$' || c.code >= 0x80
+
     private fun boundaryBefore(text: String, pos: Int) =
-        pos <= 0 || (!text[pos - 1].isLetterOrDigit() && text[pos - 1] != '_')
+        pos <= 0 || !isIdentifierChar(text[pos - 1])
     private fun boundaryAfter(text: String, pos: Int) =
-        pos >= text.length || (!text[pos].isLetterOrDigit() && text[pos] != '_')
-    // ignoreCase so this is usable on text that has not been lowercased. Every
-    // call inside this file passes already-lowercased text, where it is a
-    // no-op; RawQueryDao shares [parenGroupIsSubquery] and does not lowercase,
-    // because lowercasing is not length-preserving for all of Unicode and the
-    // paren walk is index-based.
+        pos >= text.length || !isIdentifierChar(text[pos])
+
+    private fun asciiLower(c: Char) = if (c in 'A'..'Z') c + 32 else c
+
+    /**
+     * Case-insensitive comparison folding **only** `A-Z`, matching SQLite's
+     * own keyword matching exactly.
+     *
+     * This is a fix for a real bypass, not a style preference. `lowercase()`
+     * is not a case-folding normaliser, and the JVM's
+     * `regionMatches(ignoreCase = true)` compares through
+     * `toUpperCase`/`toLowerCase`, under which exactly three non-ASCII
+     * characters collide with an ASCII letter: U+0130 and U+0131 with `i`,
+     * U+017F with `s`, U+212A with `k` (brute-forced over U+0080..U+FFFF).
+     * Two of those letters appear in keywords this file matches — `having`
+     * and `limit` carry `i`, `select` carries `s` — so
+     * `SELECT locale FROM notifications havıng, android_metadata LIMIT 1`
+     * matched the `having` stop word, ended that occurrence's clause scan
+     * early, and hid the comma join that follows it. SQLite, which folds only
+     * ASCII, read `havıng` as a plain alias and returned the unlisted
+     * table's row. Matching *more* stop words than SQLite recognises is the
+     * one direction in which [hasCommaInAnyFromClause] fails open.
+     *
+     * Folding ASCII (rather than dropping case-insensitivity altogether) is
+     * what is wanted, because this method must still work on text that has
+     * *not* been lowercased: RawQueryDao shares [parenGroupIsSubquery] and
+     * deliberately does not lowercase, since `lowercase()` is not
+     * length-preserving for all of Unicode (U+0130 lowercases to two
+     * characters) and the paren walk is index-based. An earlier comment here
+     * claimed the ignore-case flag was "a no-op for every in-file caller,
+     * which all pass lowercased text"; that was false for exactly this reason
+     * — lowercasing does not remove U+0131.
+     */
+    private fun asciiEqualsIgnoreCase(text: String, pos: Int, word: String): Boolean {
+        for (k in word.indices) {
+            if (asciiLower(text[pos + k]) != asciiLower(word[k])) return false
+        }
+        return true
+    }
+
     private fun keywordAt(text: String, pos: Int, word: String) =
         pos + word.length <= text.length &&
-            text.regionMatches(pos, word, 0, word.length, ignoreCase = true) &&
+            asciiEqualsIgnoreCase(text, pos, word) &&
             boundaryBefore(text, pos) &&
             boundaryAfter(text, pos + word.length)
 
