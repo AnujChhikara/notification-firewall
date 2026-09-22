@@ -27,10 +27,12 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.anuj.notificationfirewall.data.prefs.SecurePrefs
+import com.anuj.notificationfirewall.R
 import com.anuj.notificationfirewall.data.prefs.WallSettings
 import com.anuj.notificationfirewall.service.HealthMonitor
 import com.anuj.notificationfirewall.ui.ask.AskScreen
 import com.anuj.notificationfirewall.ui.inbox.InboxScreen
+import com.anuj.notificationfirewall.ui.insights.InsightsScreen
 import com.anuj.notificationfirewall.ui.onboarding.OnboardingScreen
 import com.anuj.notificationfirewall.ui.settings.KeysScreen
 import com.anuj.notificationfirewall.ui.settings.SettingsScreen
@@ -51,11 +53,12 @@ object Routes {
     const val WALL = "wall"
     const val INBOX = "inbox"
     const val ASK = "ask"
+    const val INSIGHTS = "insights"
     const val SETTINGS = "settings"
     const val ONBOARDING = "onboarding"
     const val KEYS = "keys"
 
-    val primary: Set<String> = setOf(WALL, INBOX, ASK, SETTINGS)
+    val primary: Set<String> = setOf(WALL, INBOX, ASK, INSIGHTS, SETTINGS)
 }
 
 @HiltViewModel
@@ -87,6 +90,9 @@ class ThemeViewModel @Inject constructor(
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        // The manifest starts this activity on Theme.Hush.Splash so the brand
+        // mark is visible until the first frame; switch to the real theme here.
+        setTheme(R.style.Theme_NotificationFirewall)
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         val openInbox = intent?.getBooleanExtra(EXTRA_OPEN_INBOX, false) ?: false
@@ -167,6 +173,7 @@ private fun NfNavGraph(nav: NavHostController, startDestination: String, themeVi
         composable(Routes.WALL) { WallScreen(nav) }
         composable(Routes.INBOX) { InboxScreen(nav) }
         composable(Routes.ASK) { AskScreen(nav) }
+        composable(Routes.INSIGHTS) { InsightsScreen() }
         composable(Routes.SETTINGS) { SettingsScreen(nav, themeViewModel) }
         composable(Routes.KEYS) { KeysScreen(nav) }
     }

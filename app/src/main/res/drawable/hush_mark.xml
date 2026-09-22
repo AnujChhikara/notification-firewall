@@ -1,0 +1,37 @@
+<!-- Hush wave mark, grayscale for the monochrome theme. Light artwork for
+     dark backgrounds (launcher foreground, dark splash). Source:
+     Hush_Brand_Assets/hush-logo-mark.svg, mint gradients mapped to gray. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="512dp"
+    android:height="512dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+    <path android:pathData="M86,263C132,189 179,173 226,204c48,31 88,94 200,45 -43,77 -90,96 -137,64 -48,-33 -89,-97 -203,-50Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="86"
+                android:startY="173"
+                android:endX="426"
+                android:endY="270">
+                <item android:offset="0" android:color="#FF3A3A3E" />
+                <item android:offset="1" android:color="#FF1A1A1E" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M86,232c47,-79 95,-102 143,-70 47,31 87,103 197,57 -42,76 -88,95 -135,63 -49,-33 -91,-100 -205,-50Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="86"
+                android:startY="130"
+                android:endX="426"
+                android:endY="290">
+                <item android:offset="0" android:color="#FFFFFFFF" />
+                <item android:offset="0.55" android:color="#FFCFCFD4" />
+                <item android:offset="1" android:color="#FF8E8E94" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>

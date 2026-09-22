@@ -1,9 +1,14 @@
 // ui/ask/AskScreen.kt
+//
+// Ask: a chat over the notification history. The on-device stats that used to
+// live above the chat now have their own Insights screen; this one is just
+// the conversation, answered by the agentic loop (AskService.askDeep).
 package com.anuj.notificationfirewall.ui.ask
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,10 +18,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.MaterialTheme
@@ -30,28 +39,29 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.anuj.notificationfirewall.ui.NfButton
-import com.anuj.notificationfirewall.ui.NfCard
-import com.anuj.notificationfirewall.ui.NfChip
-import com.anuj.notificationfirewall.ui.NfScreen
 import com.anuj.notificationfirewall.ui.Routes
-import com.anuj.notificationfirewall.ui.SectionLabel
+import com.anuj.notificationfirewall.ui.SearchIcon
+import com.anuj.notificationfirewall.ui.SparkleIcon
+import com.anuj.notificationfirewall.ui.StatusDot
 import com.anuj.notificationfirewall.ui.theme.LocalWallColors
-import kotlin.math.max
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.TextStyle
+import java.util.Locale
 
-/**
- * Ask: what the wall knows about itself, then a chat box over the same data.
- *
- * The stat cards need no API key and no network — they are plain typed queries
- * — so they render whether or not the chat below them is usable.
- */
 @Composable
 fun AskScreen(nav: NavHostController) {
     val vm: AskViewModel = hiltViewModel()
@@ -71,325 +81,334 @@ fun AskScreen(nav: NavHostController) {
         }
     }
 
-    NfScreen(title = "Ask", eyebrow = "Your history, answered on this phone") { modifier ->
-        Column(modifier.imePadding()) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.weight(1f).padding(horizontal = 20.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                item { StatCards(ui.stats) }
-                item { SectionLabel("Chat") }
+    fun send() {
+        if (!ui.hasKey) {
+            nav.navigate(Routes.KEYS)
+        } else {
+            vm.send(draft)
+            draft = ""
+        }
+    }
 
-                if (!ui.hasKey) {
-                    item { NoKeyCard(onOpenSettings = { nav.navigate(Routes.KEYS) }) }
-                } else if (ui.messages.isEmpty()) {
-                    item { EmptyChatHint() }
-                }
+    val c = LocalWallColors.current
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(c.background)
+            .statusBarsPadding()
+            .imePadding(),
+    ) {
+        // Slim header.
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(top = 14.dp, bottom = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text("Ask", style = MaterialTheme.typography.headlineLarge, color = c.title)
+            Text(
+                "Chat with your notification history.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = c.textMuted,
+            )
+        }
 
-                itemsIndexed(ui.messages) { _, message -> MessageBubble(message) }
-
-                if (ui.sending) item { ThinkingRow() }
-                item { Spacer(Modifier.height(96.dp)) }
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item { Spacer(Modifier.height(4.dp)) }
+            if (!ui.hasKey) {
+                item { NoKeyCard(onOpenSettings = { nav.navigate(Routes.KEYS) }) }
+            } else if (ui.messages.isEmpty()) {
+                item { EmptyChatHint() }
             }
+            items(ui.messages, key = { it.atMs.toString() + it.text.hashCode() }) { message ->
+                MessageTurn(message)
+            }
+            if (ui.sending) item {
+                Text("Thinking…", style = MaterialTheme.typography.bodyMedium, color = c.textMuted)
+            }
+            item { Spacer(Modifier.height(8.dp)) }
+        }
 
+        // Composer: suggestions (until the first answer), opt-in, input row.
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 100.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (ui.hasKey && ui.messages.isEmpty()) {
+                SuggestionChips(onPick = { draft = it })
+            }
             if (ui.hasKey) {
-                Composer(
-                    draft = draft,
-                    onDraftChange = { draft = it },
-                    allowContent = ui.allowContent,
-                    onAllowContentChange = vm::setAllowContent,
-                    sending = ui.sending,
-                    onSend = {
-                        vm.send(draft)
-                        draft = ""
-                    },
+                Row(
+                    Modifier
+                        .clip(CircleShape)
+                        .background(if (ui.allowContent) c.accentSoft else c.surface)
+                        .border(1.dp, if (ui.allowContent) c.accent else c.borderSubtle, CircleShape)
+                        .clickable { vm.setAllowContent(!ui.allowContent) }
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        if (ui.allowContent) "Including message content in this answer"
+                        else "Include message content in this answer",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (ui.allowContent) c.text else c.textMuted,
+                    )
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Row(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(c.surface)
+                        .border(1.dp, c.borderSubtle, RoundedCornerShape(20.dp))
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    SearchIcon(color = c.textFaint, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(9.dp))
+                    Box(Modifier.weight(1f)) {
+                        if (draft.isEmpty()) {
+                            Text(
+                                "Ask about your notifications…",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = c.textFaint,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        BasicTextField(
+                            value = draft,
+                            onValueChange = { draft = it },
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = c.text),
+                            cursorBrush = SolidColor(c.accent),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+                val canSend = draft.isNotBlank() && !ui.sending
+                Box(
+                    Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(if (canSend || !ui.hasKey) c.accent else c.surface)
+                        .clickable(enabled = canSend || !ui.hasKey, onClick = ::send),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "→",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = if (canSend || !ui.hasKey) c.onAccent else c.textFaint,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Conversation                                                        */
+/* ------------------------------------------------------------------ */
+
+private val Suggestions = listOf(
+    "Which apps interrupted me most last week?",
+    "Show quieted delivery notifications",
+    "Break down bot vs human pings",
+)
+
+@Composable
+private fun SuggestionChips(onPick: (String) -> Unit) {
+    val c = LocalWallColors.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Suggestions.forEach { question ->
+            Row(
+                Modifier
+                    .clip(CircleShape)
+                    .background(c.surface)
+                    .border(1.dp, c.borderSubtle, CircleShape)
+                    .clickable { onPick(question) }
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                StatusDot(color = c.accent, size = 6.dp)
+                Spacer(Modifier.width(7.dp))
+                Text(
+                    question,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = c.textMuted,
+                    maxLines = 1,
                 )
             }
         }
     }
 }
 
-// --- Stat cards -------------------------------------------------------------
-
-@Composable
-private fun StatCards(stats: AskStats) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        SectionLabel("Last 7 days")
-
-        StatCard(
-            label = "Noise ratio",
-            value = stats.noiseRatioPercent?.let { "$it%" } ?: "—",
-            caption = if (stats.total == 0) {
-                "Nothing has arrived yet."
-            } else {
-                "${stats.keptQuiet} of ${stats.total} never reached your screen."
-            },
-        )
-
-        NfCard {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                CardLabel("Top offenders")
-                if (stats.topOffenders.isEmpty()) {
-                    CardCaption("Nothing has been silenced yet.")
-                } else {
-                    val worst = max(1, stats.topOffenders.first().count)
-                    stats.topOffenders.forEach { app ->
-                        OffenderRow(app.appLabel, app.count, app.count / worst.toFloat())
-                    }
-                }
-            }
-        }
-
-        StatCard(
-            label = "Machines vs humans",
-            value = stats.humanSharePercent?.let { "$it%" } ?: "—",
-            caption = if (stats.judged == 0) {
-                "Nothing judged yet, so there is no share to report."
-            } else {
-                "${stats.fromHuman} of ${stats.judged} judged notifications were written by a person."
-            },
-        )
-
-        NfCard {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                CardLabel("By hour")
-                HourBars(stats.byHour)
-                CardCaption("When notifications arrive, midnight to midnight.")
-            }
-        }
-
-        StatCard(
-            label = "Correction rate",
-            value = stats.correctionRatePercent?.let { "$it%" } ?: "—",
-            caption = if (stats.judgedByThisApp == 0) {
-                "Nothing judged yet — no accuracy to report."
-            } else {
-                "${stats.corrections} corrections across ${stats.judgedByThisApp} judgements. " +
-                    "The lower this is, the more the numbers above are worth."
-            },
-        )
+private fun formatMessageTime(atMs: Long): String {
+    val zone = ZoneId.systemDefault()
+    val dt = Instant.ofEpochMilli(atMs).atZone(zone)
+    val time = String.format(Locale.ROOT, "%02d:%02d", dt.hour, dt.minute)
+    return if (dt.toLocalDate() == LocalDate.now(zone)) {
+        "Today, $time"
+    } else {
+        "${dt.dayOfMonth} ${dt.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())}, $time"
     }
 }
-
-@Composable
-private fun StatCard(label: String, value: String, caption: String) {
-    NfCard {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            CardLabel(label)
-            Text(
-                value,
-                style = MaterialTheme.typography.headlineLarge,
-                color = LocalWallColors.current.title,
-            )
-            CardCaption(caption)
-        }
-    }
-}
-
-@Composable
-private fun CardLabel(text: String) {
-    Text(text, style = MaterialTheme.typography.labelSmall, color = LocalWallColors.current.textMuted)
-}
-
-@Composable
-private fun CardCaption(text: String) {
-    Text(text, style = MaterialTheme.typography.bodyMedium, color = LocalWallColors.current.textMuted)
-}
-
-@Composable
-private fun OffenderRow(label: String, count: Int, fraction: Float) {
-    val c = LocalWallColors.current
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(
-            label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = c.text,
-            modifier = Modifier.width(110.dp),
-        )
-        Box(
-            Modifier
-                .weight(1f)
-                .height(8.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(c.borderSubtle),
-        ) {
-            Box(
-                Modifier
-                    .fillMaxWidth(fraction.coerceIn(0.02f, 1f))
-                    .height(8.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(c.bucketSilenced),
-            )
-        }
-        Text("$count", style = MaterialTheme.typography.labelMedium, color = c.textMuted)
-    }
-}
-
-@Composable
-private fun HourBars(byHour: List<Int>) {
-    val c = LocalWallColors.current
-    val peak = max(1, byHour.maxOrNull() ?: 1)
-    Row(
-        Modifier.fillMaxWidth().height(48.dp),
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
-        verticalAlignment = Alignment.Bottom,
-    ) {
-        byHour.forEach { count ->
-            Box(
-                Modifier
-                    .weight(1f)
-                    .height((6 + 42 * count / peak).dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(if (count == 0) c.borderSubtle else c.accent),
-            )
-        }
-    }
-}
-
-// --- Chat -------------------------------------------------------------------
 
 @Composable
 private fun NoKeyCard(onOpenSettings: () -> Unit) {
-    NfCard {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            CardLabel("Chat needs an OpenAI key")
-            CardCaption(
-                "The numbers above are computed on this phone and need no key. " +
-                    "Asking questions in words does: the model writes the query, " +
-                    "your phone runs it, and only the counts come back.",
-            )
-            NfButton("Add a key in Settings", onClick = onOpenSettings, primary = false)
-        }
+    val c = LocalWallColors.current
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(c.surface)
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text("Chat needs an OpenAI key", style = MaterialTheme.typography.titleMedium, color = c.title)
+        Text(
+            "Asking questions in words works like this: the model writes the " +
+                "query, your phone runs it, and only the counts come back. " +
+                "Meanwhile your Insights stay available with no key at all.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = c.textMuted,
+        )
+        NfButton("Add a key in Settings", onClick = onOpenSettings, primary = false)
     }
 }
 
 @Composable
 private fun EmptyChatHint() {
-    NfCard {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            CardCaption("Try: “which apps interrupted me most last week?”")
-            CardCaption(
-                "Your messages stay here. What is sent is the question, the table and " +
-                    "column names, and the counts that come back — which can include app " +
-                    "names, but never a title, a body or a sender.",
-            )
-        }
-    }
-}
-
-@Composable
-private fun MessageBubble(message: AskMessage) {
-    val c = LocalWallColors.current
-    var showSql by remember(message) { mutableStateOf(false) }
-
-    Row(horizontalArrangement = if (message.fromUser) Arrangement.End else Arrangement.Start) {
-        if (message.fromUser) Spacer(Modifier.weight(0.15f))
-        Column(
-            Modifier
-                .weight(0.85f)
-                .clip(RoundedCornerShape(14.dp))
-                .background(if (message.fromUser) c.accentSoft else c.surface)
-                .border(
-                    1.dp,
-                    if (message.refused) c.danger else c.borderSubtle,
-                    RoundedCornerShape(14.dp),
-                )
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                message.text,
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (message.refused) c.danger else c.text,
-            )
-            if (message.sql != null) {
-                Text(
-                    if (showSql) "Hide query" else "Show query",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = c.textMuted,
-                    modifier = Modifier.clickable { showSql = !showSql },
-                )
-                if (showSql) {
-                    Text(
-                        message.sql,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
-                        color = c.textMuted,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(c.background)
-                            .padding(10.dp),
-                    )
-                }
-            }
-        }
-        if (!message.fromUser) Spacer(Modifier.weight(0.15f))
-    }
-}
-
-@Composable
-private fun ThinkingRow() {
-    CardCaption("Thinking…")
-}
-
-@Composable
-private fun Composer(
-    draft: String,
-    onDraftChange: (String) -> Unit,
-    allowContent: Boolean,
-    onAllowContentChange: (Boolean) -> Unit,
-    sending: Boolean,
-    onSend: () -> Unit,
-) {
     val c = LocalWallColors.current
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp)
-            .padding(bottom = 86.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            .clip(RoundedCornerShape(24.dp))
+            .background(c.surface)
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        NfChip(
-            text = if (allowContent) "Including message content" else "Include message content in this answer",
-            selected = allowContent,
-            onClick = { onAllowContentChange(!allowContent) },
+        Text(
+            "Ask anything about the last stretch — totals first, then details.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = c.text,
         )
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
+        Text(
+            "Your messages stay here. What is sent is the question, the table and " +
+                "column names, and the counts that come back — which can include app " +
+                "names, but never a title, a body or a sender.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = c.textMuted,
+        )
+    }
+}
+
+@Composable
+private fun MessageTurn(message: AskMessage) {
+    val c = LocalWallColors.current
+    if (message.fromUser) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             Box(
                 Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(c.surface)
-                    .border(1.dp, c.border, RoundedCornerShape(12.dp))
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                    .fillMaxWidth(0.85f)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(c.accentSoft)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
             ) {
-                if (draft.isEmpty()) {
-                    Text(
-                        "Ask about your notifications…",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = c.textFaint,
-                    )
-                }
-                BasicTextField(
-                    value = draft,
-                    onValueChange = onDraftChange,
-                    singleLine = false,
-                    maxLines = 4,
-                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = c.text),
-                    cursorBrush = SolidColor(c.accent),
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                Text(message.text, style = MaterialTheme.typography.bodyMedium, color = c.text)
             }
-            NfButton(
-                text = "Ask",
-                onClick = onSend,
-                enabled = !sending && draft.isNotBlank(),
+        }
+        return
+    }
+    var showQueries by remember(message) { mutableStateOf(false) }
+    // The agent's full trail, oldest first; falls back to the single query
+    // the one-shot path stored.
+    val trail = if (message.queries.isNotEmpty()) message.queries
+    else listOfNotNull(message.sql)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(c.surface)
+            .border(if (message.refused) 1.dp else 0.dp, if (message.refused) c.danger else Color.Transparent, RoundedCornerShape(24.dp))
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(c.accent.copy(alpha = 0.14f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                SparkleIcon(color = c.accent, modifier = Modifier.size(17.dp))
+            }
+            Spacer(Modifier.width(9.dp))
+            Text(
+                "Hush Assistant",
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Medium),
+                color = c.accent,
             )
+            Spacer(Modifier.weight(1f))
+            Text(formatMessageTime(message.atMs), style = MaterialTheme.typography.labelMedium, color = c.textMuted)
+        }
+        Text(
+            message.text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (message.refused) c.danger else c.text,
+        )
+        if (trail.isNotEmpty()) {
+            Text(
+                if (showQueries) "Hide queries" else "Show ${if (trail.size > 1) "${trail.size} queries" else "query"}",
+                style = MaterialTheme.typography.labelMedium,
+                color = c.textMuted,
+                modifier = Modifier.clickable { showQueries = !showQueries },
+            )
+            if (showQueries) {
+                trail.forEachIndexed { i, sql ->
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        if (trail.size > 1) {
+                            Text(
+                                "Query ${i + 1}",
+                                style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.sp),
+                                color = c.textFaint,
+                            )
+                        }
+                        Text(
+                            sql,
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                            color = c.textMuted,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(c.background)
+                                .padding(10.dp),
+                        )
+                    }
+                }
+            }
         }
     }
 }

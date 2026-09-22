@@ -1,0 +1,4 @@
+<!-- Android 13+ themed-icon layer: solid mark, tinted by the system. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/hush_mark_mono"
+    android:inset="20%" />

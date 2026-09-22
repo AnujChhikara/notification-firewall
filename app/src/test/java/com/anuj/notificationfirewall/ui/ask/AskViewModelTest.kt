@@ -205,8 +205,8 @@ class AskViewModelTest {
     @Test
     fun anAnsweredQuestionShowsTheProseAndTheQueryItRan() = runTest {
         seed(n = 2)
-        server.enqueue(chatResponse("SELECT COUNT(*) AS c FROM notifications LIMIT 1"))
-        server.enqueue(chatResponse("Two notifications."))
+        server.enqueue(chatResponse("""{"sql": "SELECT COUNT(*) AS c FROM notifications LIMIT 1"}"""))
+        server.enqueue(chatResponse("""{"answer": "Two notifications."}"""))
 
         val vm = viewModel()
         vm.sendNow("how many?")
@@ -217,14 +217,15 @@ class AskViewModelTest {
         assertTrue(messages[0].fromUser)
         assertEquals("Two notifications.", messages[1].text)
         assertEquals("SELECT COUNT(*) AS c FROM notifications LIMIT 1", messages[1].sql)
+        assertEquals(listOf("SELECT COUNT(*) AS c FROM notifications LIMIT 1"), messages[1].queries)
         assertFalse(vm.ui.value.sending)
     }
 
     @Test
     fun allowContentResetsToOffAfterEverySend() = runTest {
         seed(n = 1)
-        server.enqueue(chatResponse("SELECT COUNT(*) AS c FROM notifications LIMIT 1"))
-        server.enqueue(chatResponse("One."))
+        server.enqueue(chatResponse("""{"sql": "SELECT COUNT(*) AS c FROM notifications LIMIT 1"}"""))
+        server.enqueue(chatResponse("""{"answer": "One."}"""))
 
         val vm = viewModel()
         vm.setAllowContent(true)
@@ -237,7 +238,7 @@ class AskViewModelTest {
 
     @Test
     fun aRefusalIsShownWithItsReasonAndTheRejectedSql() = runTest {
-        server.enqueue(chatResponse("SELECT title FROM notifications LIMIT 10"))
+        server.enqueue(chatResponse("""{"sql": "SELECT title FROM notifications LIMIT 10"}"""))
 
         val vm = viewModel()
         vm.sendNow("what did they say?")

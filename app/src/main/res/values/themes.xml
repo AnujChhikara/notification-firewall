@@ -10,4 +10,14 @@
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">false</item>
     </style>
+
+    <!-- Launch splash: brand mark on the theme canvas. MainActivity uses this
+         from the manifest and switches to Theme.NotificationFirewall in
+         onCreate, so the splash is visible only until the first frame. The
+         layer and canvas both have -night variants. -->
+    <style name="Theme.Hush.Splash" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@drawable/splash_layer</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
 </resources>

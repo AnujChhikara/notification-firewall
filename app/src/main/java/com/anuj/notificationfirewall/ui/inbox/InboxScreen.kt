@@ -1,7 +1,10 @@
 // ui/inbox/InboxScreen.kt
+//
+// Hush-styled classification stream. UI-only pass: filtering, search, expand,
+// swipe corrections with undo, the long-press sheet and override actions all
+// call the same InboxViewModel methods as before.
 package com.anuj.notificationfirewall.ui.inbox
 
-import android.text.format.DateUtils
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -10,20 +13,24 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SnackbarHost
@@ -42,22 +49,37 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.anuj.notificationfirewall.domain.wall.Correction
+import com.anuj.notificationfirewall.domain.wall.NotificationCategory
 import com.anuj.notificationfirewall.domain.wall.OverrideKind
 import com.anuj.notificationfirewall.domain.wall.WallBucket
-import com.anuj.notificationfirewall.ui.NfChip
-import com.anuj.notificationfirewall.ui.NfScreen
+import com.anuj.notificationfirewall.domain.wall.WallDecisionSource
+import com.anuj.notificationfirewall.ui.BlockIcon
+import com.anuj.notificationfirewall.ui.BoltIcon
+import com.anuj.notificationfirewall.ui.SearchIcon
+import com.anuj.notificationfirewall.ui.ShieldIcon
+import com.anuj.notificationfirewall.ui.StarIcon
 import com.anuj.notificationfirewall.ui.StatusDot
 import com.anuj.notificationfirewall.ui.bucketColor
 import com.anuj.notificationfirewall.ui.theme.LocalWallColors
 import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.TextStyle
+import java.util.Locale
 
 private enum class InboxFilter(val label: String) {
-    ALL("All"), SILENCED("Silenced"), RANG("Rang"), DROPPED("Dropped");
+    ALL("All"), RANG("Rang"), SILENCED("Silenced"), DROPPED("Dropped");
 
     fun matches(bucket: WallBucket): Boolean = when (this) {
         ALL -> true
@@ -72,10 +94,12 @@ fun InboxScreen(nav: NavHostController) {
     val vm: InboxViewModel = hiltViewModel()
     val rows by vm.rows.collectAsStateWithLifecycle()
     var filter by remember { mutableStateOf(InboxFilter.ALL) }
+    var query by remember { mutableStateOf("") }
     var expandedId by remember { mutableStateOf<Long?>(null) }
     var sheetRow by remember { mutableStateOf<InboxRow?>(null) }
     val snackbarHost = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val c = LocalWallColors.current
 
     // Undo restores the exact pre-correction bias rather than applying the
     // opposite Correction: at the +-0.75 clamp a same-direction correction is
@@ -98,43 +122,86 @@ fun InboxScreen(nav: NavHostController) {
         }
     }
 
-    NfScreen(title = "Inbox") { modifier ->
-        Box(modifier) {
-            Column(Modifier.fillMaxSize()) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 20.dp)
-                        .padding(bottom = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    InboxFilter.entries.forEach { f ->
-                        NfChip(text = f.label, selected = filter == f, onClick = { filter = f })
-                    }
-                }
+    val visible = remember(rows, filter, query) {
+        val q = query.trim().lowercase(Locale.ROOT)
+        rows.filter { row ->
+            filter.matches(row.bucket) && (q.isBlank() ||
+                row.appLabel.contains(q, ignoreCase = true) ||
+                row.displayName.contains(q, ignoreCase = true) ||
+                (row.title?.contains(q, ignoreCase = true) == true) ||
+                (row.text?.contains(q, ignoreCase = true) == true))
+        }
+    }
+    fun countFor(f: InboxFilter): Int = rows.count { f.matches(it.bucket) }
 
-                val visible = rows.filter { filter.matches(it.bucket) }
-                LazyColumn(
-                    Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 112.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    items(visible, key = { it.id }) { row ->
-                        InboxRowItem(
-                            row = row,
-                            expanded = expandedId == row.id,
-                            onTap = { expandedId = if (expandedId == row.id) null else row.id },
-                            onLongPress = { sheetRow = row },
-                            onSilence = { correctWithUndo(row, Correction.SHOULD_HAVE_BEEN_SILENT) },
-                            onRing = { correctWithUndo(row, Correction.SHOULD_HAVE_RUNG) },
-                        )
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(c.background)
+            .statusBarsPadding()
+            .imePadding(),
+    ) {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 112.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            item { PrivacyHeader(retentionDays = vm.retentionDays) }
+            item {
+                SearchBar(
+                    query = query,
+                    onQueryChange = { query = it },
+                )
+            }
+            item {
+                FilterPills(
+                    filter = filter,
+                    onSelect = { filter = it },
+                    countFor = ::countFor,
+                )
+            }
+            item {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(
+                        "CLASSIFICATION STREAM",
+                        style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.4.sp),
+                        color = c.textMuted,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        StatusDot(color = c.bucketRang, size = 6.dp)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Live Triage", style = MaterialTheme.typography.labelMedium, color = c.bucketRang)
                     }
                 }
             }
-
-            SnackbarHost(snackbarHost, modifier = Modifier.align(Alignment.BottomCenter))
+            items(visible, key = { it.id }) { row ->
+                InboxCard(
+                    row = row,
+                    expanded = expandedId == row.id,
+                    onTap = { expandedId = if (expandedId == row.id) null else row.id },
+                    onLongPress = { sheetRow = row },
+                    onSilence = { correctWithUndo(row, Correction.SHOULD_HAVE_BEEN_SILENT) },
+                    onRing = { correctWithUndo(row, Correction.SHOULD_HAVE_RUNG) },
+                    onAlwaysRing = { vm.addOverride(row, OverrideKind.VIP) },
+                    onBlock = { vm.addOverride(row, OverrideKind.BLOCK) },
+                )
+            }
+            item {
+                if (visible.isEmpty()) {
+                    Text(
+                        if (rows.isEmpty()) "No notifications yet. When they arrive, they will be triaged here."
+                        else "No matches for this filter.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = c.textMuted,
+                        modifier = Modifier.padding(vertical = 12.dp),
+                    )
+                } else {
+                    EndOfStream()
+                }
+            }
         }
+
+        SnackbarHost(snackbarHost, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 100.dp))
     }
 
     sheetRow?.let { row ->
@@ -157,15 +224,187 @@ fun InboxScreen(nav: NavHostController) {
     }
 }
 
+/* ------------------------------------------------------------------ */
+/* Header, search, filters                                             */
+/* ------------------------------------------------------------------ */
+
+@Composable
+private fun PrivacyHeader(retentionDays: Int) {
+    val c = LocalWallColors.current
+    val window = when (retentionDays) {
+        0 -> "Forever"
+        1 -> "1-day"
+        else -> "$retentionDays-day"
+    }
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ShieldIcon(color = c.accent, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(
+            "$window local retention window",
+            style = MaterialTheme.typography.bodyMedium,
+            color = c.textMuted,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            "ZERO CLOUD",
+            style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.2.sp),
+            color = c.bucketRang,
+        )
+    }
+}
+
+@Composable
+private fun SearchBar(query: String, onQueryChange: (String) -> Unit) {
+    val c = LocalWallColors.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(CircleShape)
+            .background(c.surface)
+            .padding(horizontal = 16.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SearchIcon(color = c.textMuted, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(10.dp))
+        Box(Modifier.weight(1f)) {
+            if (query.isEmpty()) {
+                Text(
+                    "Search notifications, apps, rules...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = c.textFaint,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyMedium.copy(color = c.text),
+                cursorBrush = SolidColor(c.accent),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun FilterPills(filter: InboxFilter, onSelect: (InboxFilter) -> Unit, countFor: (InboxFilter) -> Int) {
+    val c = LocalWallColors.current
+    val order = listOf(InboxFilter.ALL, InboxFilter.RANG, InboxFilter.SILENCED, InboxFilter.DROPPED)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        order.forEach { f ->
+            val selected = filter == f
+            val dot = when (f) {
+                InboxFilter.ALL -> null
+                InboxFilter.RANG -> c.bucketRang
+                InboxFilter.SILENCED -> c.bucketSilenced
+                InboxFilter.DROPPED -> c.bucketDropped
+            }
+            Row(
+                Modifier
+                    .clip(CircleShape)
+                    .background(if (selected) c.accent else c.surface)
+                    .clickable { onSelect(f) }
+                    .padding(horizontal = 15.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (dot != null) {
+                    StatusDot(color = if (selected) c.onAccent else dot, size = 7.dp)
+                    Spacer(Modifier.width(7.dp))
+                }
+                Text(
+                    f.label,
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                    color = if (selected) c.onAccent else c.textMuted,
+                )
+                Spacer(Modifier.width(7.dp))
+                Box(
+                    Modifier
+                        .clip(CircleShape)
+                        .background(
+                            if (selected) c.onAccent.copy(alpha = 0.18f)
+                            else c.background,
+                        )
+                        .padding(horizontal = 7.dp, vertical = 2.dp),
+                ) {
+                    Text(
+                        "${countFor(f)}",
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                        color = if (selected) c.onAccent else c.textMuted,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Stream cards                                                        */
+/* ------------------------------------------------------------------ */
+
+private data class OutcomePill(val text: String, val tint: Color)
+
+@Composable
+private fun outcomePill(row: InboxRow): OutcomePill {
+    val c = LocalWallColors.current
+    return when (row.bucket) {
+        WallBucket.RING -> {
+            val tag = when (row.source) {
+                WallDecisionSource.VIP -> "VIP Contact"
+                WallDecisionSource.OTP -> "OTP Fast Path"
+                else -> row.importance?.let { "Importance %.1f".format(it) } ?: "Allowed"
+            }
+            OutcomePill("Rang • $tag", c.bucketRang)
+        }
+        WallBucket.SILENCE -> {
+            val tag = when (row.source) {
+                WallDecisionSource.PENDING -> "Re-judging soon"
+                else -> row.category?.let { categoryLabel(it) } ?: "Held quietly"
+            }
+            OutcomePill("Silenced • $tag", c.bucketSilenced)
+        }
+        WallBucket.DROP -> OutcomePill("Dropped • Block list", c.bucketDropped)
+    }
+}
+
+private fun categoryLabel(category: NotificationCategory): String =
+    category.name.lowercase(Locale.ROOT).replace('_', ' ')
+        .replaceFirstChar { it.uppercase(Locale.ROOT) }
+
+private fun inboxTime(timestampMs: Long): String {
+    val zone = ZoneId.systemDefault()
+    val dt = Instant.ofEpochMilli(timestampMs).atZone(zone)
+    return if (dt.toLocalDate() == LocalDate.now(zone)) {
+        val h12 = when (val h = dt.hour % 12) {
+            0 -> 12
+            else -> h
+        }
+        "$h12:${dt.minute.toString().padStart(2, '0')} ${if (dt.hour < 12) "AM" else "PM"}"
+    } else {
+        "${dt.dayOfMonth} ${dt.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())}"
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
-private fun InboxRowItem(
+private fun InboxCard(
     row: InboxRow,
     expanded: Boolean,
     onTap: () -> Unit,
     onLongPress: () -> Unit,
     onSilence: () -> Unit,
     onRing: () -> Unit,
+    onAlwaysRing: () -> Unit,
+    onBlock: () -> Unit,
 ) {
     val c = LocalWallColors.current
     val dismissState = rememberSwipeToDismissBoxState(
@@ -181,62 +420,200 @@ private fun InboxRowItem(
             false
         },
     )
+    val status = bucketColor(row.bucket)
+    val pill = outcomePill(row)
 
-    Column {
-        SwipeToDismissBox(
-            state = dismissState,
-            backgroundContent = { SwipeBackground(dismissState.dismissDirection) },
+    SwipeToDismissBox(
+        state = dismissState,
+        backgroundContent = { SwipeBackground(dismissState.dismissDirection) },
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(if (expanded) c.surfaceElevated else c.surface)
+                .combinedClickable(onClick = onTap, onLongClick = onLongPress)
+                .padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .background(c.background)
-                    .combinedClickable(onClick = onTap, onLongClick = onLongPress)
-                    .padding(horizontal = 8.dp, vertical = 12.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    StatusDot(bucketColor(row.bucket))
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            row.displayName,
-                            style = MaterialTheme.typography.titleMedium,
-                            color = c.text,
-                        )
-                        val bodyText = row.title ?: row.text
-                        Text(
-                            bodyText ?: "Content expired",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (bodyText == null) c.textFaint else c.textMuted,
-                            maxLines = if (expanded) Int.MAX_VALUE else 1,
-                        )
-                    }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(c.background),
+                    contentAlignment = Alignment.Center,
+                ) {
                     Text(
-                        relativeTime(row.timestampMs),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = c.textMuted,
+                        row.appLabel.firstOrNull()?.uppercase() ?: "•",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = status,
                     )
                 }
-                Spacer(Modifier.height(8.dp))
-                Text(row.explanation, style = MaterialTheme.typography.labelSmall, color = c.textFaint)
+                Spacer(Modifier.width(11.dp))
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            row.appLabel,
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = c.title,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        if (row.displayName != row.appLabel) {
+                            Text(" • ", style = MaterialTheme.typography.bodyMedium, color = c.textFaint)
+                            Text(
+                                row.displayName,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = c.textMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(inboxTime(row.timestampMs), style = MaterialTheme.typography.labelMedium, color = c.textMuted)
+            }
 
-                if (expanded) {
-                    Spacer(Modifier.height(8.dp))
+            val bodyText = row.title ?: row.text
+            Text(
+                bodyText ?: "Content expired",
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (bodyText == null) c.textFaint else c.text,
+                maxLines = if (expanded) Int.MAX_VALUE else 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+
+            Row(
+                Modifier
+                    .clip(CircleShape)
+                    .background(c.background)
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (row.source == WallDecisionSource.OTP) {
+                    BoltIcon(color = pill.tint, modifier = Modifier.size(13.dp))
+                } else {
+                    StatusDot(color = pill.tint, size = 6.dp)
+                }
+                Spacer(Modifier.width(7.dp))
+                Text(
+                    pill.text,
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
+                    color = pill.tint,
+                )
+            }
+
+            if (expanded) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(c.background)
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    TraceLine(
+                        label = "Classification",
+                        value = buildString {
+                            append(row.category?.let { categoryLabel(it) } ?: "Uncategorised")
+                            row.confidence?.let { append(" (%.0f%% conf.)".format(it * 100)) }
+                        },
+                        valueTint = c.bucketSilenced,
+                    )
+                    TraceLine(label = "Matched rule", value = row.explanation)
                     if (row.text != null && row.text != row.title) {
                         Text(row.text, style = MaterialTheme.typography.bodyMedium, color = c.textMuted)
-                        Spacer(Modifier.height(6.dp))
                     }
                     Text(
                         "importance ${row.importance?.let { "%.2f".format(it) } ?: "—"}" +
-                            " · bias ${"%+.2f".format(row.biasApplied)}" +
-                            " · confidence ${row.confidence?.let { "%.0f%%".format(it * 100) } ?: "—"}",
+                            " · bias ${"%+.2f".format(row.biasApplied)}",
                         style = MaterialTheme.typography.labelSmall,
                         color = c.textFaint,
                     )
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Row(
+                            Modifier
+                                .weight(1f)
+                                .height(44.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(c.surfaceElevated)
+                                .clickable(onClick = onAlwaysRing)
+                                .padding(horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                        ) {
+                            StarIcon(color = c.bucketRang, modifier = Modifier.size(17.dp))
+                            Spacer(Modifier.width(7.dp))
+                            Text("Always Ring", style = MaterialTheme.typography.labelLarge, color = c.text)
+                        }
+                        Row(
+                            Modifier
+                                .weight(1f)
+                                .height(44.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(c.surfaceElevated)
+                                .clickable(onClick = onBlock)
+                                .padding(horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                        ) {
+                            BlockIcon(color = c.bucketDropped, modifier = Modifier.size(17.dp))
+                            Spacer(Modifier.width(7.dp))
+                            Text("Never Show", style = MaterialTheme.typography.labelLarge, color = c.text)
+                        }
+                    }
                 }
             }
         }
-        HorizontalDivider(color = c.borderSubtle)
+    }
+}
+
+@Composable
+private fun TraceLine(label: String, value: String, valueTint: Color? = null) {
+    val c = LocalWallColors.current
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = c.textMuted)
+        Spacer(Modifier.width(12.dp))
+        Text(
+            value,
+            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Medium),
+            color = valueTint ?: c.text,
+        )
+    }
+}
+
+@Composable
+private fun EndOfStream() {
+    val c = LocalWallColors.current
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 22.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            Modifier
+                .size(38.dp)
+                .clip(CircleShape)
+                .background(c.surface),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("✓", style = MaterialTheme.typography.titleMedium, color = c.accent)
+        }
+        Text("Inbox in uninterrupted flow", style = MaterialTheme.typography.titleMedium, color = c.title)
+        Text(
+            "Zero unclassified notifications. Hush is guarding your attention.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = c.textMuted,
+        )
     }
 }
 
@@ -251,7 +628,7 @@ private fun SwipeBackground(direction: SwipeToDismissBoxValue?) {
     Box(
         Modifier
             .fillMaxSize()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(20.dp))
             .background(bg)
             .padding(horizontal = 20.dp),
         contentAlignment = alignment,
@@ -300,9 +677,3 @@ private fun SheetOption(text: String, onClick: () -> Unit) {
             .padding(horizontal = 20.dp, vertical = 16.dp),
     )
 }
-
-private fun relativeTime(timestampMs: Long): String = DateUtils.getRelativeTimeSpanString(
-    timestampMs,
-    System.currentTimeMillis(),
-    DateUtils.MINUTE_IN_MILLIS,
-).toString()

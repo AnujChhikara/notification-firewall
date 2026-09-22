@@ -1,9 +1,11 @@
 package com.anuj.notificationfirewall.ui.inbox
 
+import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.anuj.notificationfirewall.data.db.NfDatabase
 import com.anuj.notificationfirewall.data.db.NotificationRecordEntity
+import com.anuj.notificationfirewall.data.prefs.WallSettings
 import com.anuj.notificationfirewall.domain.wall.BiasStore
 import com.anuj.notificationfirewall.domain.wall.Correction
 import com.anuj.notificationfirewall.domain.wall.JevVerdict
@@ -66,7 +68,9 @@ class InboxViewModelTest {
         bias = BiasStore(db.senderBiasDao()) { 1_700_000_000_000L }
         overrides = OverrideStore(db.overrideDao())
         cache = VerdictCache(db.verdictCacheDao()) { 1_700_000_000_000L }
-        vm = InboxViewModel(db.notificationDao(), bias, overrides, cache)
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val settings = WallSettings(context.getSharedPreferences("inbox-test", Context.MODE_PRIVATE))
+        vm = InboxViewModel(db.notificationDao(), bias, overrides, cache, settings)
     }
 
     @After

@@ -1,0 +1,13 @@
+<!-- Solid-white Hush wave for the Android 13+ themed launcher icon. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="512dp"
+    android:height="512dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M86,263C132,189 179,173 226,204c48,31 88,94 200,45 -43,77 -90,96 -137,64 -48,-33 -89,-97 -203,-50Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M86,232c47,-79 95,-102 143,-70 47,31 87,103 197,57 -42,76 -88,95 -135,63 -49,-33 -91,-100 -205,-50Z" />
+</vector>

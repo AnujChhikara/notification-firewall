@@ -178,7 +178,7 @@ fun NfButton(
     }
     val fg = when {
         !enabled -> c.textFaint
-        primary -> c.title
+        primary -> c.onAccent
         else -> c.text
     }
     Box(
@@ -239,6 +239,7 @@ val NfNavItems = listOf(
     NfNavItem(Routes.WALL, R.drawable.ic_nav_wall, "Wall"),
     NfNavItem(Routes.INBOX, R.drawable.ic_nav_inbox, "Inbox"),
     NfNavItem(Routes.ASK, R.drawable.ic_nav_ask, "Ask"),
+    NfNavItem(Routes.INSIGHTS, R.drawable.ic_nav_insights, "Insights"),
     NfNavItem(Routes.SETTINGS, R.drawable.ic_nav_settings, "Settings"),
 )
 
@@ -270,7 +271,7 @@ fun NfBottomBar(currentRoute: String?, onSelect: (String) -> Unit, modifier: Mod
                 Icon(
                     painter = painterResource(item.iconRes),
                     contentDescription = item.label,
-                    tint = if (selected) c.text else c.textMuted,
+                    tint = if (selected) c.accent else c.textMuted,
                     modifier = Modifier.size(21.dp),
                 )
             }

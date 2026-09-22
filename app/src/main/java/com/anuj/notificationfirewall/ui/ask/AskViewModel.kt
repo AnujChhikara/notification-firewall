@@ -8,12 +8,14 @@ import com.anuj.notificationfirewall.data.db.dao.AppCount
 import com.anuj.notificationfirewall.data.db.dao.NotificationDao
 import com.anuj.notificationfirewall.data.db.dao.SenderBiasDao
 import com.anuj.notificationfirewall.data.prefs.SecurePrefs
+import com.anuj.notificationfirewall.domain.wall.WallBucket
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import javax.inject.Inject
 import kotlin.math.roundToInt
@@ -21,6 +23,9 @@ import kotlin.math.roundToInt
 private const val DAY_MS = 24L * 60 * 60 * 1000
 private const val STATS_WINDOW_DAYS = 7
 private const val TOP_OFFENDERS = 5
+
+/** Monday-first single-letter day labels for the weekly chart. */
+private val DAY_LETTERS = listOf("M", "T", "W", "T", "F", "S", "S")
 
 /**
  * The five numbers above the chat box.
@@ -39,6 +44,10 @@ data class AskStats(
     val byHour: List<Int> = List(24) { 0 },
     val corrections: Int = 0,
     val judgedByThisApp: Int = 0,
+    /** Allowed vs quieted per day, oldest first, for the weekly chart. */
+    val weekly: List<DaySplit> = emptyList(),
+    /** Arrivals per daily phase, derived from [byHour]. */
+    val phases: List<PhaseSplit> = emptyList(),
 ) {
     /** Share of arrivals the wall kept off the screen (silenced or dropped). */
     val noiseRatioPercent: Int? get() = share(keptQuiet, total)
@@ -59,6 +68,27 @@ data class AskMessage(
     val text: String,
     val sql: String? = null,
     val refused: Boolean = false,
+    /** When the turn was posted, for the "Today, 09:38" header. */
+    val atMs: Long = System.currentTimeMillis(),
+    /** Every query the agent ran for this answer, oldest first. */
+    val queries: List<String> = emptyList(),
+)
+
+/** One day of the 7-day attention chart: allowed rings vs quieted pings. */
+data class DaySplit(
+    /** Single-letter day label (M/T/W/T/F/S/S) for the actual date. */
+    val dayLabel: String,
+    val rang: Int = 0,
+    val quiet: Int = 0,
+) {
+    val total: Int get() = rang + quiet
+}
+
+/** Arrivals in one daily phase, summed from the hourly histogram. */
+data class PhaseSplit(
+    val name: String,
+    val range: String,
+    val count: Int = 0,
 )
 
 data class AskUiState(
@@ -126,7 +156,43 @@ class AskViewModel @Inject constructor(
                 byHour = hours.toList(),
                 corrections = senderBiasDao.totalCorrections(),
                 judgedByThisApp = notificationDao.countJudgedByThisApp(),
+                weekly = loadWeekly(zone),
+                phases = phasesFrom(hours),
             ),
+        )
+    }
+
+    /**
+     * Per-day allowed/quieted splits for the weekly chart, oldest first. Seven
+     * small [countsForDay] queries -- the same call the Wall screen already
+     * makes once for today.
+     */
+    private suspend fun loadWeekly(zone: ZoneId): List<DaySplit> {
+        val today = LocalDate.now(zone)
+        return (STATS_WINDOW_DAYS - 1 downTo 0).map { back ->
+            val date = today.minusDays(back.toLong())
+            val start = date.atStartOfDay(zone).toInstant().toEpochMilli()
+            val rows = notificationDao.countsForDay(start, start + DAY_MS)
+                .associate { it.bucket to it.count }
+            DaySplit(
+                dayLabel = DAY_LETTERS[date.dayOfWeek.value - 1],
+                rang = rows[WallBucket.RING] ?: 0,
+                quiet = (rows[WallBucket.SILENCE] ?: 0) + (rows[WallBucket.DROP] ?: 0),
+            )
+        }
+    }
+
+    /**
+     * Day-phase arrival counts from the hourly histogram. These are arrivals,
+     * not interception rates -- per-phase quieted splits would need new DAO
+     * queries, so the card reports what the histogram actually knows.
+     */
+    private fun phasesFrom(hours: IntArray): List<PhaseSplit> {
+        fun sum(range: IntRange): Int = range.sumOf { hours.getOrElse(it) { 0 } }
+        return listOf(
+            PhaseSplit("Work Hours", "09:00 - 17:00", sum(9..16)),
+            PhaseSplit("Evening Calm", "17:00 - 22:00", sum(17..21)),
+            PhaseSplit("Nocturnal Sleep", "22:00 - 08:00", sum(22..23) + sum(0..7)),
         )
     }
 
@@ -144,11 +210,12 @@ class AskViewModel @Inject constructor(
             allowContent = false,
         )
 
-        val reply = when (val outcome = askService.ask(asked, allowContent)) {
+        val reply = when (val outcome = askService.askDeep(asked, allowContent)) {
             is AskOutcome.Answered -> AskMessage(
                 fromUser = false,
                 text = outcome.text,
                 sql = outcome.sql,
+                queries = outcome.steps.map { it.sql },
             )
             // A refusal is shown, with what was refused and why. Silently
             // swallowing it would teach the user the feature is flaky rather
