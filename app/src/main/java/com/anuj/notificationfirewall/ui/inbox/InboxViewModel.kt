@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.anuj.notificationfirewall.data.db.NotificationRecordEntity
 import com.anuj.notificationfirewall.data.db.dao.NotificationDao
+import com.anuj.notificationfirewall.data.prefs.WallSettings
 import com.anuj.notificationfirewall.domain.wall.BiasStore
 import com.anuj.notificationfirewall.domain.wall.Correction
 import com.anuj.notificationfirewall.domain.wall.NotificationCategory
@@ -77,11 +78,15 @@ class InboxViewModel @Inject constructor(
     private val bias: BiasStore,
     private val overrides: OverrideStore,
     private val cache: VerdictCache,
+    private val settings: WallSettings,
 ) : ViewModel() {
 
     val rows: StateFlow<List<InboxRow>> = notificationDao.observeRecent(500)
         .map { records -> records.map { it.toRow() } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Days of text retention, for the "N-day local retention window" header. */
+    val retentionDays: Int get() = settings.textRetentionDays
 
     /**
      * Records a correction.

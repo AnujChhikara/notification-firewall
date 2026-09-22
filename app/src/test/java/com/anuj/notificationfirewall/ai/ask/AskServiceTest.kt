@@ -251,4 +251,45 @@ class AskServiceTest {
             phrasing.any { it.contains("ZEBRAFISHTITLE") },
         )
     }
+
+    @Test
+    fun agentRunsTwoQueriesThenAnswersFromBoth() = runTest {
+        seed("com.myntra", "Myntra", 3)
+        server.enqueue(chatResponse("""{"sql": "SELECT COUNT(*) AS c FROM notifications LIMIT 1"}"""))
+        server.enqueue(
+            chatResponse(
+                """{"sql": "SELECT appLabel, COUNT(*) AS c FROM notifications GROUP BY appLabel LIMIT 10"}""",
+            ),
+        )
+        server.enqueue(chatResponse("""{"answer": "Myntra sent all 3 notifications."}"""))
+
+        val outcome = service.askDeep("who spams me most?", allowContent = false)
+
+        assertTrue(outcome.toString(), outcome is AskOutcome.Answered)
+        outcome as AskOutcome.Answered
+        assertTrue(outcome.text.contains("Myntra"))
+        assertEquals(2, outcome.steps.size)
+        assertEquals(3, server.requestCount)
+    }
+
+    @Test
+    fun agentStopsWhenAQueryIsRefused() = runTest {
+        seed("com.myntra", "Myntra", 1)
+        server.enqueue(chatResponse("""{"sql": "SELECT title FROM notifications LIMIT 10"}"""))
+
+        val outcome = service.askDeep("what did they say?", allowContent = false)
+
+        assertTrue(outcome is AskOutcome.Refused)
+        assertEquals("a refusal must end the loop, not invite a retry", 1, server.requestCount)
+    }
+
+    @Test
+    fun agentAnswerWithoutAnyQueryIsADataLessGuess() = runTest {
+        seed("com.myntra", "Myntra", 1)
+        server.enqueue(chatResponse("""{"answer": "Probably Myntra."}"""))
+
+        val outcome = service.askDeep("who spams me most?", allowContent = false)
+
+        assertTrue(outcome.toString(), outcome is AskOutcome.Failed)
+    }
 }

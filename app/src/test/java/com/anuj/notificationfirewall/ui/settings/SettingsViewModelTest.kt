@@ -100,6 +100,14 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun textRetentionChangePersistsAndUpdatesUiState() = runTest {
+        vm.setTextRetentionDays(14)
+
+        assertEquals(14, settings.textRetentionDays)
+        assertEquals(14, vm.ui.value.textRetentionDays)
+    }
+
+    @Test
     fun addingAVipOverrideShowsUpInTheVipList() = runTest {
         vm.addOverride(OverrideKind.VIP, "com.whatsapp", "WhatsApp")
 

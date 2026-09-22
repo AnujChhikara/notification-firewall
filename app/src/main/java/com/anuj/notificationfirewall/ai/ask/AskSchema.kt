@@ -104,4 +104,55 @@ internal object AskSchema {
         "You are given a question and the result rows of a query over the user's own " +
             "notification history. Answer the question directly in one or two sentences, " +
             "citing the numbers. Do not mention SQL. If the rows are empty, say so plainly."
+
+    /**
+     * System prompt for the agentic loop ([AskService.askDeep]): the model sees
+     * the full data format up front and answers over up to [AskService.MAX_AGENT_QUERIES]
+     * queries, choosing each next step from the rows the previous one returned.
+     */
+    fun agentPrompt(allowContent: Boolean, nowEpochMs: Long): String = """
+        You are an analyst over a personal notification history stored in SQLite.
+        You work in steps. Every reply is EXACTLY one JSON object and nothing else:
+        - {"sql": "SELECT ..."} to run a query and see its rows, or
+        - {"answer": "..."} when the rows you have seen settle the question.
+
+        Data format:
+        $DDL
+        - Timestamps are epoch milliseconds. Now is $nowEpochMs. In SQLite use
+          datetime(timestampEpochMs / 1000, 'unixepoch') for calendar math, e.g.
+          a day bucket is date(timestampEpochMs / 1000, 'unixepoch').
+        - bucket is RING (interrupted), SILENCE (held quietly) or DROP (removed
+          by an explicit block rule). "Kept quiet" means SILENCE or DROP.
+        - decisionSource says why: OTP (one-time code, always rings), VIP
+          (always-ring list), BLOCK (block list, always DROP), CACHE/JEV
+          (model verdict, fresh or reused), PENDING (not judged yet), LEGACY
+          (older app version), EXPIRED (text purged before any verdict, so its
+          importanceScore/category/isFromHuman/needsAction/isTimeSensitive/
+          jevConfidence are NULL -- aggregates skip NULLs, never COALESCE them).
+        - importanceScore runs 1.0 (noise) to 5.0 (critical); the wall rings at
+          the user's threshold plus a learned biasApplied of -0.75..0.75.
+        - isFromHuman, isTimeSensitive, needsAction, jevConfidence run 0..1.
+        - category is one of PROMOTION, PERSONAL_MESSAGE, TRANSACTIONAL, WORK,
+          SOCIAL, NEWS, SYSTEM, DELIVERY, OTHER.
+        - Columns marked CONTENT (title, text, senderKey, contentShape,
+          overrides.label) all derive from the message itself: senderKey is the
+          title verbatim. appLabel and packageName name the app and are not content.
+        ${if (allowContent) {
+            "You MAY select or filter on the CONTENT columns for this question."
+        } else {
+            "You must NOT reference title, text, senderKey, contentShape or label " +
+                "anywhere. Group by who or what sent a notification with appLabel " +
+                "or packageName instead."
+        }}
+
+        Method:
+        - You may run up to ${AskService.MAX_AGENT_QUERIES} queries. Start broad
+          (totals), then drill down (by app, day, bucket or source) as the rows
+          suggest. Stop early when you have enough.
+        - Every query: exactly one SELECT statement, no semicolons or comments,
+          with a LIMIT of at most ${SqlValidator.MAX_LIMIT}. Prefer aggregates
+          (COUNT, AVG, GROUP BY) over raw rows.
+        - The final answer is 2-4 sentences citing the numbers you actually saw.
+          If the rows came back empty, say so plainly instead of guessing.
+    """.trimIndent()
 }

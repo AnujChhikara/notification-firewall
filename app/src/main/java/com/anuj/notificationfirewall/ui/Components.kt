@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -119,6 +120,7 @@ fun NfRow(
     Row(
         modifier
             .fillMaxWidth()
+            .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(10.dp))
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 8.dp, vertical = 12.dp),
@@ -176,11 +178,12 @@ fun NfButton(
     }
     val fg = when {
         !enabled -> c.textFaint
-        primary -> c.title
+        primary -> c.onAccent
         else -> c.text
     }
     Box(
         modifier
+            .heightIn(min = 48.dp)
             .clip(shape)
             .background(bg)
             .then(if (!primary) Modifier.border(1.dp, c.border, shape) else Modifier)
@@ -236,6 +239,7 @@ val NfNavItems = listOf(
     NfNavItem(Routes.WALL, R.drawable.ic_nav_wall, "Wall"),
     NfNavItem(Routes.INBOX, R.drawable.ic_nav_inbox, "Inbox"),
     NfNavItem(Routes.ASK, R.drawable.ic_nav_ask, "Ask"),
+    NfNavItem(Routes.INSIGHTS, R.drawable.ic_nav_insights, "Insights"),
     NfNavItem(Routes.SETTINGS, R.drawable.ic_nav_settings, "Settings"),
 )
 
@@ -267,7 +271,7 @@ fun NfBottomBar(currentRoute: String?, onSelect: (String) -> Unit, modifier: Mod
                 Icon(
                     painter = painterResource(item.iconRes),
                     contentDescription = item.label,
-                    tint = if (selected) c.text else c.textMuted,
+                    tint = if (selected) c.accent else c.textMuted,
                     modifier = Modifier.size(21.dp),
                 )
             }

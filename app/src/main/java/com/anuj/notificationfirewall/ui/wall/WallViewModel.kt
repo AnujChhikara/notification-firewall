@@ -106,6 +106,17 @@ class WallViewModel @Inject constructor(
         refresh()
     }
 
+    /**
+     * Starts break-glass for an explicit preset duration (the Wall screen's
+     * 15m/30m/1h chips), clamped to the same 5..120 range as the Settings
+     * default. Does not persist -- the Settings value stays the default for
+     * the next window and for the quick tile.
+     */
+    fun breakGlassFor(minutes: Int) {
+        breakGlassController.start(durationMs = minutes.coerceIn(5, 120) * 60_000L)
+        refresh()
+    }
+
     /** "Re-arm now": closes the window early and re-arms immediately. */
     fun cancelBreakGlass() {
         breakGlassController.cancel()

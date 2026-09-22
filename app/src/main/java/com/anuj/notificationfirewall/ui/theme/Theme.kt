@@ -21,7 +21,7 @@ private val NfShapes = Shapes(
 
 private fun materialScheme(c: WallColors) = if (c.isLight) {
     lightColorScheme(
-        primary = c.accent, onPrimary = c.surfaceElevated,
+        primary = c.accent, onPrimary = c.onAccent,
         secondary = c.accent,
         background = c.background, onBackground = c.text,
         surface = c.background, onSurface = c.text,
@@ -32,7 +32,7 @@ private fun materialScheme(c: WallColors) = if (c.isLight) {
     )
 } else {
     darkColorScheme(
-        primary = c.accent, onPrimary = c.title,
+        primary = c.accent, onPrimary = c.onAccent,
         secondary = c.accent,
         background = c.background, onBackground = c.text,
         surface = c.background, onSurface = c.text,
