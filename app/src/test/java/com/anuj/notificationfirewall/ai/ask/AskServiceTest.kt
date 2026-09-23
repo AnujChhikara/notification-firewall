@@ -284,12 +284,28 @@ class AskServiceTest {
     }
 
     @Test
-    fun agentAnswerWithoutAnyQueryIsADataLessGuess() = runTest {
+    fun agentGreetsWithoutQuerying() = runTest {
         seed("com.myntra", "Myntra", 1)
+        server.enqueue(chatResponse("""{"answer": "Hello! Ask me about your notifications."}"""))
+
+        val outcome = service.askDeep("hi", allowContent = false)
+
+        assertTrue(outcome.toString(), outcome is AskOutcome.Answered)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun agentIsNudgedToQueryForDataQuestions() = runTest {
+        seed("com.myntra", "Myntra", 3)
         server.enqueue(chatResponse("""{"answer": "Probably Myntra."}"""))
+        server.enqueue(chatResponse("""{"sql": "SELECT COUNT(*) AS c FROM notifications LIMIT 1"}"""))
+        server.enqueue(chatResponse("""{"answer": "3 notifications, all Myntra."}"""))
 
         val outcome = service.askDeep("who spams me most?", allowContent = false)
 
-        assertTrue(outcome.toString(), outcome is AskOutcome.Failed)
+        assertTrue(outcome.toString(), outcome is AskOutcome.Answered)
+        outcome as AskOutcome.Answered
+        assertEquals(1, outcome.steps.size)
+        assertEquals(3, server.requestCount)
     }
 }

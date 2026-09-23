@@ -46,7 +46,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -62,7 +61,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
-import com.anuj.notificationfirewall.ai.PersistedDigest
 import com.anuj.notificationfirewall.domain.wall.WallBucket
 import com.anuj.notificationfirewall.service.WallState
 import com.anuj.notificationfirewall.ui.BoltIcon
@@ -154,27 +152,15 @@ fun WallScreen(nav: NavHostController) {
             }
 
             Spacer(Modifier.height(22.dp))
-            OutcomesSection(counts = ui.counts)
-
             if (breakGlassUntilMs == null) {
-                Spacer(Modifier.height(18.dp))
                 HushBreakGlassCard(
                     configuredMinutes = ui.breakGlassDurationMinutes,
                     enabled = ui.state == WallState.ARMED || ui.state == WallState.DISARMED,
                     onActivate = vm::breakGlassFor,
                 )
+                Spacer(Modifier.height(22.dp))
             }
-
-            // Spec §5.1: "the most recent digest as a card." Nothing was
-            // computed here -- ui.digest is exactly what DigestWorker
-            // persisted after building the notification (see
-            // WallViewModel.loadDigestIfFresh), so this card can never show
-            // a different headline than the one the user was actually
-            // notified with.
-            ui.digest?.let { digest ->
-                Spacer(Modifier.height(18.dp))
-                HushDigestCard(digest = digest, onOpenInbox = { nav.navigate(Routes.INBOX) })
-            }
+            OutcomesSection(counts = ui.counts)
         }
     }
 }
@@ -403,20 +389,12 @@ private fun ArmedHero(
     }
 }
 
-/** Dashed orbit ring, disc, shield outline and check -- all drawn, no icon font. */
+/** Disc, shield outline and check -- all drawn, no icon font. */
 @Composable
 private fun ShieldEmblem(armed: Boolean) {
     val c = LocalWallColors.current
     Canvas(Modifier.size(88.dp)) {
         val w = size.width
-        val dashed = PathEffect.dashPathEffect(floatArrayOf(9f, 9f), 0f)
-        drawArc(
-            color = c.accent.copy(alpha = 0.45f),
-            startAngle = 0f,
-            sweepAngle = 360f,
-            useCenter = false,
-            style = Stroke(width = 2f, pathEffect = dashed),
-        )
         drawCircle(color = c.surfaceElevated, radius = w * 0.36f)
         // Shield outline in a 100x100 box mapped onto the disc.
         val s = w * 0.72f / 100f
@@ -797,119 +775,6 @@ private fun HushBlockedCard(message: String, buttonLabel: String, onFix: () -> U
                 ),
                 color = c.onAccent,
             )
-        }
-    }
-}
-
-/* ------------------------------------------------------------------ */
-/* Digest                                                              */
-/* ------------------------------------------------------------------ */
-
-@Composable
-private fun HushDigestCard(digest: PersistedDigest, onOpenInbox: () -> Unit) {
-    val c = LocalWallColors.current
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(c.surface)
-            .padding(18.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            BoltIcon(color = c.accent, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(7.dp))
-            Text("Daily Digest", style = MaterialTheme.typography.titleMedium, color = c.title)
-            Spacer(Modifier.weight(1f))
-            Row(
-                Modifier
-                    .clip(CircleShape)
-                    .background(c.background)
-                    .padding(horizontal = 9.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                StatusDot(color = c.accent, size = 5.dp)
-                Spacer(Modifier.width(5.dp))
-                Text(
-                    "ON-DEVICE",
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, letterSpacing = 1.sp),
-                    color = c.accent,
-                )
-            }
-        }
-        Spacer(Modifier.height(10.dp))
-        Text(digest.headline, style = MaterialTheme.typography.bodyMedium, color = c.text)
-        if (digest.worthALook.isNotEmpty()) {
-            Spacer(Modifier.height(12.dp))
-            Text(
-                "WORTH A LOOK",
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, letterSpacing = 1.4.sp),
-                color = c.textMuted,
-            )
-            Spacer(Modifier.height(8.dp))
-            digest.worthALook.take(2).forEach { line ->
-                DigestPreviewRow(line = line)
-                Spacer(Modifier.height(8.dp))
-            }
-        }
-        Row(
-            Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .clickable(onClick = onOpenInbox)
-                .padding(vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("Review full history in Inbox", style = MaterialTheme.typography.labelLarge, color = c.accent)
-            Spacer(Modifier.width(6.dp))
-            Text("→", style = MaterialTheme.typography.labelLarge, color = c.accent)
-        }
-    }
-}
-
-/** A "Sender: message" line rendered as an avatar-initial row. */
-@Composable
-private fun DigestPreviewRow(line: String) {
-    val c = LocalWallColors.current
-    val sender = line.substringBefore(": ", missingDelimiterValue = "").ifBlank { line }
-    val message = if (line.contains(": ")) line.substringAfter(": ") else ""
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(c.surfaceElevated)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            Modifier
-                .size(34.dp)
-                .clip(CircleShape)
-                .background(c.background),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                sender.firstOrNull()?.uppercase() ?: "•",
-                style = MaterialTheme.typography.titleMedium,
-                color = c.bucketRang,
-            )
-        }
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                sender,
-                style = MaterialTheme.typography.labelLarge,
-                color = c.title,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (message.isNotEmpty()) {
-                Text(
-                    "\"$message\"",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = c.textMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
         }
     }
 }

@@ -1,4 +1,6 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
-    <path android:fillColor="#FFFFFFFF" android:pathData="M20,2H4C2.9,2 2,2.9 2,4v18l4,-4h14c1.1,0 2,-0.9 2,-2V4C22,2.9 21.1,2 20,2z"/>
+    <!-- AI sparkle: large 4-point star with a small satellite spark. -->
+    <path android:fillColor="#FFFFFFFF" android:pathData="M12,2C12.6,7.4 14.6,10.4 20,11C14.6,11.6 12.6,14.6 12,20C11.4,14.6 9.4,11.6 4,11C9.4,10.4 11.4,7.4 12,2Z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M19,14C19.3,16 20.2,17 22.2,17.3C20.2,17.6 19.3,18.6 19,20.6C18.7,18.6 17.8,17.6 15.8,17.3C17.8,17 18.7,16 19,14Z" />
 </vector>
