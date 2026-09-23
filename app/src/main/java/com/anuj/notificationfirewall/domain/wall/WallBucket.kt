@@ -16,7 +16,7 @@ enum class WallBucket { RING, SILENCE, DROP }
  * could ever be obtained for it -- distinct from LEGACY, which means the
  * record WAS judged, just by an earlier version of the app's scoring model.
  */
-enum class WallDecisionSource { OTP, VIP, BLOCK, CACHE, JEV, PENDING, LEGACY, EXPIRED }
+enum class WallDecisionSource { OTP, VIP, BLOCK, CALL, CACHE, JEV, PENDING, LEGACY, EXPIRED }
 
 enum class OverrideKind { VIP, BLOCK }
 

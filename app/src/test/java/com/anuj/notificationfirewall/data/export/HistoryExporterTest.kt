@@ -58,7 +58,7 @@ class HistoryExporterTest {
     @Test
     fun exportsMetadataWithoutContentByDefault() = runTest {
         seed()
-        val json = exporter.toJson(includeContent = false, threshold = 3f)
+        val json = exporter.toJson(includeContent = false, threshold = 3f, personalBar = 2.5f)
 
         assertFalse("content must be opt-in even in an export", json.contains("SECRET BODY"))
         assertTrue(json.contains("Myntra"))
@@ -68,7 +68,7 @@ class HistoryExporterTest {
     @Test
     fun metadataOnlyExportCarriesNoTitleEvenViaSenderKey() = runTest {
         seed()
-        val json = exporter.toJson(includeContent = false, threshold = 3f)
+        val json = exporter.toJson(includeContent = false, threshold = 3f, personalBar = 2.5f)
 
         // senderKey is a verbatim copy of the title, so exporting it outside
         // the includeContent branch put every title in the history into a
@@ -83,7 +83,7 @@ class HistoryExporterTest {
     @Test
     fun purgedRowExportsNoSenderKeyEvenWithContentRequested() = runTest {
         seed(purgedAt = 1_700_000_500_000L)
-        val json = exporter.toJson(includeContent = true, threshold = 3f)
+        val json = exporter.toJson(includeContent = true, threshold = 3f, personalBar = 2.5f)
 
         // Retention nulls title/text but leaves senderKey populated, so
         // without the purge guard an opt-in export would hand back text
@@ -94,7 +94,7 @@ class HistoryExporterTest {
     @Test
     fun includesContentWhenExplicitlyRequested() = runTest {
         seed()
-        val json = exporter.toJson(includeContent = true, threshold = 3f)
+        val json = exporter.toJson(includeContent = true, threshold = 3f, personalBar = 2.5f)
         assertTrue(json.contains("SECRET BODY"))
         assertTrue(json.contains(SECRET_TITLE))
     }
@@ -103,7 +103,7 @@ class HistoryExporterTest {
     fun producesParseableJsonWithACountHeader() = runTest {
         seed()
         seed()
-        val root = JSONObject(exporter.toJson(includeContent = false, threshold = 3f))
+        val root = JSONObject(exporter.toJson(includeContent = false, threshold = 3f, personalBar = 2.5f))
 
         assertEquals(2, root.getInt("count"))
         assertEquals(2, root.getJSONArray("notifications").length())
@@ -111,23 +111,47 @@ class HistoryExporterTest {
 
     @Test
     fun emptyHistoryExportsAnEmptyArrayNotAnError() = runTest {
-        val root = JSONObject(exporter.toJson(includeContent = false, threshold = 3f))
+        val root = JSONObject(exporter.toJson(includeContent = false, threshold = 3f, personalBar = 2.5f))
         assertEquals(0, root.getInt("count"))
     }
 
     @Test
     fun rowsCarryOutcomeBiasedScoreAndWhyForExternalVerification() = runTest {
         seed()
-        val root = JSONObject(exporter.toJson(includeContent = false, threshold = 3f))
+        val root = JSONObject(exporter.toJson(includeContent = false, threshold = 3f, personalBar = 2.5f))
 
         assertEquals(3.0, root.getDouble("threshold"), 0.0)
-        assertTrue(root.getString("thresholdMeaning").contains("biasedScore >= threshold"))
+        assertTrue(root.getString("thresholdMeaning").contains("biasedScore >= its bar"))
 
         val row = root.getJSONArray("notifications").getJSONObject(0)
         assertEquals("SILENCE", row.getString("bucket"))
         assertEquals("muted", row.getString("outcome"))
         assertEquals(1.4, row.getDouble("biasedScore"), 0.001)
-        assertTrue(row.getString("why").contains("vs threshold"))
+        assertTrue(row.getString("why").contains("vs global bar"))
+    }
+
+    @Test
+    fun personalQuestionRowNamesThePersonalBar() = runTest {
+        db.notificationDao().insert(
+            NotificationRecordEntity(
+                packageName = "com.whatsapp", appLabel = "WhatsApp",
+                title = "Anmol Rishi", text = "Can you come to gurgaon?",
+                timestampEpochMs = 1_700_000_000_000L, senderKey = "Anmol Rishi",
+                contentShape = "shape", importanceScore = 3.44f, biasApplied = 0f,
+                category = NotificationCategory.PERSONAL_MESSAGE, isTimeSensitive = null,
+                isFromHuman = 0.9f, needsAction = null, jevConfidence = 0.39f,
+                decisionSource = WallDecisionSource.JEV, bucket = WallBucket.RING,
+                pendingClassification = false, textPurgedAt = null, isRead = false,
+            ),
+        )
+        val root = JSONObject(
+            exporter.toJson(includeContent = false, threshold = 4.05f, personalBar = 2.5f),
+        )
+        val row = root.getJSONArray("notifications").getJSONObject(0)
+        assertTrue(
+            "a re-checking model must compare against the personal bar, not the global one",
+            row.getString("why").contains("vs personal-question bar 2.5"),
+        )
     }
 
     @Test
@@ -144,7 +168,7 @@ class HistoryExporterTest {
                 pendingClassification = false, textPurgedAt = null, isRead = false,
             ),
         )
-        val root = JSONObject(exporter.toJson(includeContent = false, threshold = 3f))
+        val root = JSONObject(exporter.toJson(includeContent = false, threshold = 3f, personalBar = 2.5f))
         val row = root.getJSONArray("notifications").getJSONObject(0)
         assertEquals("shown", row.getString("outcome"))
         assertEquals(4.7, row.getDouble("biasedScore"), 0.001)

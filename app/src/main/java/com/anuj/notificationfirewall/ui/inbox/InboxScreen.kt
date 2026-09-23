@@ -511,6 +511,7 @@ private fun outcomePill(row: InboxRow): OutcomePill {
             val tag = when (row.source) {
                 WallDecisionSource.VIP -> "VIP Contact"
                 WallDecisionSource.OTP -> "OTP Fast Path"
+                WallDecisionSource.CALL -> "Live Call"
                 else -> row.importance?.let { "Importance %.1f".format(it) } ?: "Allowed"
             }
             OutcomePill("Rang • $tag", c.bucketRang)

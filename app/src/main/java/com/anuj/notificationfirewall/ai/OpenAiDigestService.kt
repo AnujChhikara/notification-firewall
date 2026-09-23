@@ -34,6 +34,14 @@ object DigestBuilder {
     private const val WORTH_A_LOOK_FLOOR = 2.5f
     private const val WORTH_A_LOOK_MAX = 3
 
+    /**
+     * Verdicts below this confidence sort first: a mid-scoring notification
+     * Jev was unsure about (e.g. a 3.24-confidence-0.33 KYC mail) is exactly
+     * the thing a morning glance should catch, ahead of high-confidence
+     * items the wall was sure it was right to silence.
+     */
+    private const val LOW_CONFIDENCE = 0.40f
+
     fun summarise(records: List<NotificationRecordEntity>): DigestData {
         val silencedRecords = records.filter { it.bucket == WallBucket.SILENCE }
 
@@ -45,7 +53,10 @@ object DigestBuilder {
 
         val worthALook = silencedRecords
             .filter { (it.importanceScore ?: 0f) >= WORTH_A_LOOK_FLOOR }
-            .sortedByDescending { it.importanceScore }
+            .sortedWith(
+                compareByDescending<NotificationRecordEntity> { (it.jevConfidence ?: 0f) < LOW_CONFIDENCE }
+                    .thenByDescending { it.importanceScore ?: 0f },
+            )
             .take(WORTH_A_LOOK_MAX)
             .map(::renderWorthALookLine)
 

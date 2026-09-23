@@ -16,11 +16,12 @@ class DigestBuilderTest {
         bucket: WallBucket,
         importance: Float = 1.2f,
         sender: String = app,
+        confidence: Float = 0.9f,
     ) = NotificationRecordEntity(
         packageName = "com.$app", appLabel = app, title = "$sender says hi", text = "body",
         timestampEpochMs = 1_700_000_000_000L, senderKey = sender, contentShape = "shape",
         importanceScore = importance, biasApplied = 0f, category = NotificationCategory.PROMOTION,
-        isTimeSensitive = 0.1f, isFromHuman = 0.1f, needsAction = 0.1f, jevConfidence = 0.9f,
+        isTimeSensitive = 0.1f, isFromHuman = 0.1f, needsAction = 0.1f, jevConfidence = confidence,
         decisionSource = WallDecisionSource.JEV, bucket = bucket,
         pendingClassification = false, textPurgedAt = null, isRead = false,
     )
@@ -86,6 +87,24 @@ class DigestBuilderTest {
     fun worthALookExcludesObviousNoise() {
         val data = DigestBuilder.summarise(List(5) { record("Myntra", WallBucket.SILENCE, importance = 1.1f) })
         assertTrue(data.worthALook.isEmpty())
+    }
+
+    @Test
+    fun worthALookSurfacesLowConfidenceItemsFirst() {
+        // A 3.3 the wall was sure about is less worth your glance than a 3.2
+        // it was not: when unsure, show.
+        val data = DigestBuilder.summarise(
+            listOf(
+                record("Sure", WallBucket.SILENCE, importance = 3.3f, confidence = 0.9f),
+                record("Unsure", WallBucket.SILENCE, importance = 3.2f, confidence = 0.33f),
+            ),
+        )
+
+        assertEquals(2, data.worthALook.size)
+        assertTrue(
+            "low-confidence items sort ahead of high-confidence ones: ${data.worthALook}",
+            data.worthALook.first().contains("Unsure"),
+        )
     }
 
     @Test

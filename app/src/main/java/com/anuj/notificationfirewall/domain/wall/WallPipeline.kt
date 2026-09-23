@@ -18,9 +18,18 @@ private val HOUR_MINUTE: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm"
  * 1. **OTP** first, ahead of even the block list — a passcode has an immediate
  *    concrete cost if silenced, and this path needs no network.
  * 2. **Block**, then **VIP** — the user's explicit instructions outrank any
- *    model judgement.
- * 3. **Cache** — a verdict already earned for this exact content shape.
- * 4. **Jev** — the only step that touches the network.
+ *    model judgement, heuristic or otherwise.
+ * 3. **Call** — a live huddle/call invite expires within minutes, so it rings
+ *    without consulting Jev. Deliberately below block/VIP (an instruction
+ *    beats a heuristic) and above cache (a live invite must never be answered
+ *    from a stale verdict).
+ * 4. **Cache** — a verdict already earned for this exact content shape.
+ * 5. **Jev** — the only step that touches the network.
+ *
+ * The final buzz bar is cost-sensitive, not global: a 1:1 personal question
+ * ([DmDetector]) rings at [PERSONAL_QUESTION_BAR] instead of the user's
+ * threshold, because a missed direct question costs more than a missed
+ * promo. Everything else keeps the global bar.
  *
  * Every step before Jev is local and instant, so the common case (a sender the
  * wall already recognises) costs nothing and works on a plane.
@@ -60,8 +69,12 @@ class WallPipeline(
 
         val appliedBias = bias.biasFor(n.packageName, sender)
 
+        if (CallDetector.isLiveCallInvite(n.packageName, n.title, n.text)) {
+            return WallDecision(WallBucket.RING, WallDecisionSource.CALL, null, 0f, shape, false)
+        }
+
         cache.get(n.packageName, sender, shape)?.let { cached ->
-            return decided(cached, WallDecisionSource.CACHE, appliedBias, shape)
+            return decided(cached, WallDecisionSource.CACHE, appliedBias, shape, n)
         }
 
         val state = JevState(
@@ -103,7 +116,19 @@ class WallPipeline(
         }
 
         cache.put(shape, n.packageName, sender, verdict)
-        return decided(verdict, WallDecisionSource.JEV, appliedBias, shape)
+        return decided(verdict, WallDecisionSource.JEV, appliedBias, shape, n)
+    }
+
+    companion object {
+        /**
+         * Buzz bar for 1:1 personal questions. Calibrated against a 65-row
+         * hand-labelled export sample (Sept 2026): every genuine personal
+         * miss scored 2.68–3.44 while correctly-silenced 1:1 chatter with no
+         * question signal sits anywhere, so the [DmDetector] shape gate does
+         * the real work and this bar just needs to clear the misses without
+         * reaching down into reaction/GIF territory.
+         */
+        const val PERSONAL_QUESTION_BAR = 2.5f
     }
 
     private fun decided(
@@ -111,10 +136,14 @@ class WallPipeline(
         source: WallDecisionSource,
         appliedBias: Float,
         shape: String,
+        n: IncomingNotification,
     ): WallDecision {
         val biased = verdict.importance + appliedBias
+        val personalQuestion = verdict.category == NotificationCategory.PERSONAL_MESSAGE &&
+            DmDetector.isPersonalQuestion(n.title, n.text)
+        val bar = if (personalQuestion) PERSONAL_QUESTION_BAR else settings.threshold
         return WallDecision(
-            bucket = if (biased >= settings.threshold) WallBucket.RING else WallBucket.SILENCE,
+            bucket = if (biased >= bar) WallBucket.RING else WallBucket.SILENCE,
             source = source,
             verdict = verdict,
             biasApplied = appliedBias,
