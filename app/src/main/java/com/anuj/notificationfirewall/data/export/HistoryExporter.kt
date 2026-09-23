@@ -1,6 +1,10 @@
 package com.anuj.notificationfirewall.data.export
 
 import com.anuj.notificationfirewall.data.db.dao.NotificationDao
+import com.anuj.notificationfirewall.domain.wall.DmDetector
+import com.anuj.notificationfirewall.domain.wall.NotificationCategory
+import com.anuj.notificationfirewall.domain.wall.WallBucket
+import com.anuj.notificationfirewall.domain.wall.WallDecisionSource
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -29,11 +33,26 @@ import org.json.JSONObject
  */
 class HistoryExporter(private val notificationDao: NotificationDao) {
 
-    suspend fun toJson(includeContent: Boolean): String {
+    /**
+     * @param threshold the wall's global show/mute bar (1-5 scale).
+     * @param personalBar the lower bar for 1:1 personal questions
+     *   ([DmDetector]). A second model re-checking a row must compare
+     *   `biasedScore` against the bar named in that row's `why`, not the
+     *   global threshold unconditionally.
+     */
+    suspend fun toJson(includeContent: Boolean, threshold: Float, personalBar: Float): String {
         val records = notificationDao.recordsBetween(0, Long.MAX_VALUE)
 
         val array = JSONArray()
         records.forEach { r ->
+            val biasedScore = r.importanceScore?.plus(r.biasApplied)
+            // Classification only, never emitted: title/text stay behind the
+            // includeContent gate below even though the bar label depends on
+            // reading them here.
+            val personalQuestion = r.category == NotificationCategory.PERSONAL_MESSAGE &&
+                DmDetector.isPersonalQuestion(r.title.orEmpty(), r.text.orEmpty())
+            val bar = if (personalQuestion) personalBar else threshold
+            val barKind = if (personalQuestion) "personal-question" else "global"
             array.put(
                 JSONObject().apply {
                     put("timestampEpochMs", r.timestampEpochMs)
@@ -42,9 +61,12 @@ class HistoryExporter(private val notificationDao: NotificationDao) {
                     put("category", r.category?.name ?: JSONObject.NULL)
                     put("importanceScore", r.importanceScore ?: JSONObject.NULL)
                     put("biasApplied", r.biasApplied)
+                    put("biasedScore", biasedScore ?: JSONObject.NULL)
                     put("jevConfidence", r.jevConfidence ?: JSONObject.NULL)
                     put("decisionSource", r.decisionSource.name)
                     put("bucket", r.bucket.name)
+                    put("outcome", r.bucket.outcomeLabel())
+                    put("why", r.decisionSource.explain(biasedScore, bar, barKind))
                     if (includeContent) {
                         val purged = r.textPurgedAt != null
                         put("senderKey", if (purged) JSONObject.NULL else r.senderKey ?: JSONObject.NULL)
@@ -58,8 +80,42 @@ class HistoryExporter(private val notificationDao: NotificationDao) {
         return JSONObject().apply {
             put("exportedAtEpochMs", System.currentTimeMillis())
             put("includesContent", includeContent)
+            put("threshold", threshold.toDouble())
+            put("personalQuestionBar", personalBar.toDouble())
+            put(
+                "thresholdMeaning",
+                "A notification with a verdict is shown when biasedScore >= its bar, muted otherwise. " +
+                    "biasedScore = importanceScore + biasApplied. The bar is the global threshold except " +
+                    "for 1:1 personal questions, which use personalQuestionBar (see each row's why for " +
+                    "which bar applied). Rows decided by OTP/VIP/BLOCK/CALL bypass scoring entirely; " +
+                    "PENDING/EXPIRED rows never received a verdict.",
+            )
             put("count", records.size)
             put("notifications", array)
         }.toString(2)
+    }
+
+    private fun WallBucket.outcomeLabel(): String = when (this) {
+        WallBucket.RING -> "shown"
+        WallBucket.SILENCE -> "muted"
+        WallBucket.DROP -> "blocked"
+    }
+
+    private fun WallDecisionSource.explain(
+        biasedScore: Float?,
+        bar: Float,
+        barKind: String,
+    ): String = when (this) {
+        WallDecisionSource.OTP -> "one-time-code fast path: always shown"
+        WallDecisionSource.VIP -> "sender on VIP list: always shown"
+        WallDecisionSource.BLOCK -> "sender on block list: always blocked"
+        WallDecisionSource.CALL -> "live call/huddle invite: always shown"
+        WallDecisionSource.CACHE -> "reused a cached verdict for identical content"
+        WallDecisionSource.JEV ->
+            if (biasedScore == null) "AI verdict missing despite JEV source"
+            else "AI score $biasedScore vs $barKind bar $bar"
+        WallDecisionSource.PENDING -> "muted while waiting for a verdict"
+        WallDecisionSource.LEGACY -> "judged by an earlier scoring model"
+        WallDecisionSource.EXPIRED -> "text expired before a verdict arrived"
     }
 }

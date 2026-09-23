@@ -7,6 +7,7 @@ package com.anuj.notificationfirewall.ui.inbox
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
@@ -55,6 +56,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
@@ -66,9 +68,9 @@ import com.anuj.notificationfirewall.domain.wall.WallDecisionSource
 import com.anuj.notificationfirewall.ui.BlockIcon
 import com.anuj.notificationfirewall.ui.BoltIcon
 import com.anuj.notificationfirewall.ui.SearchIcon
-import com.anuj.notificationfirewall.ui.ShieldIcon
 import com.anuj.notificationfirewall.ui.StarIcon
 import com.anuj.notificationfirewall.ui.StatusDot
+import com.anuj.notificationfirewall.ui.TuneIcon
 import com.anuj.notificationfirewall.ui.bucketColor
 import com.anuj.notificationfirewall.ui.theme.LocalWallColors
 import kotlinx.coroutines.launch
@@ -95,6 +97,9 @@ fun InboxScreen(nav: NavHostController) {
     val rows by vm.rows.collectAsStateWithLifecycle()
     var filter by remember { mutableStateOf(InboxFilter.ALL) }
     var query by remember { mutableStateOf("") }
+    var timeRange by remember { mutableStateOf(TimeRange.ALL) }
+    var appFilter by remember { mutableStateOf<String?>(null) }
+    var showFilters by remember { mutableStateOf(false) }
     var expandedId by remember { mutableStateOf<Long?>(null) }
     var sheetRow by remember { mutableStateOf<InboxRow?>(null) }
     val snackbarHost = remember { SnackbarHostState() }
@@ -122,15 +127,25 @@ fun InboxScreen(nav: NavHostController) {
         }
     }
 
-    val visible = remember(rows, filter, query) {
+    val visible = remember(rows, filter, query, timeRange, appFilter) {
         val q = query.trim().lowercase(Locale.ROOT)
+        val cutoff = timeRange.cutoffMs()
         rows.filter { row ->
-            filter.matches(row.bucket) && (q.isBlank() ||
-                row.appLabel.contains(q, ignoreCase = true) ||
-                row.displayName.contains(q, ignoreCase = true) ||
-                (row.title?.contains(q, ignoreCase = true) == true) ||
-                (row.text?.contains(q, ignoreCase = true) == true))
+            filter.matches(row.bucket) &&
+                row.timestampMs >= cutoff &&
+                (appFilter == null || row.appLabel == appFilter) &&
+                (q.isBlank() ||
+                    row.appLabel.contains(q, ignoreCase = true) ||
+                    row.displayName.contains(q, ignoreCase = true) ||
+                    (row.title?.contains(q, ignoreCase = true) == true) ||
+                    (row.text?.contains(q, ignoreCase = true) == true))
         }
+    }
+    val apps = remember(rows) {
+        rows.groupBy { it.appLabel }
+            .mapValues { it.value.size }
+            .toList()
+            .sortedByDescending { it.second }
     }
     fun countFor(f: InboxFilter): Int = rows.count { f.matches(it.bucket) }
 
@@ -146,11 +161,12 @@ fun InboxScreen(nav: NavHostController) {
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 112.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            item { PrivacyHeader(retentionDays = vm.retentionDays) }
             item {
-                SearchBar(
+                SearchRow(
                     query = query,
                     onQueryChange = { query = it },
+                    filtersActive = timeRange != TimeRange.ALL || appFilter != null,
+                    onOpenFilters = { showFilters = true },
                 )
             }
             item {
@@ -222,71 +238,205 @@ fun InboxScreen(nav: NavHostController) {
             },
         )
     }
+
+    if (showFilters) {
+        FilterDialog(
+            timeRange = timeRange,
+            onTimeRange = { timeRange = it },
+            appFilter = appFilter,
+            apps = apps,
+            onApp = { appFilter = it },
+            onClearAll = {
+                timeRange = TimeRange.ALL
+                appFilter = null
+            },
+            onDismiss = { showFilters = false },
+        )
+    }
 }
 
 /* ------------------------------------------------------------------ */
 /* Header, search, filters                                             */
 /* ------------------------------------------------------------------ */
 
-@Composable
-private fun PrivacyHeader(retentionDays: Int) {
-    val c = LocalWallColors.current
-    val window = when (retentionDays) {
-        0 -> "Forever"
-        1 -> "1-day"
-        else -> "$retentionDays-day"
-    }
-    Row(
-        Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        ShieldIcon(color = c.accent, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.width(8.dp))
-        Text(
-            "$window local retention window",
-            style = MaterialTheme.typography.bodyMedium,
-            color = c.textMuted,
-            modifier = Modifier.weight(1f),
-        )
-        Text(
-            "ZERO CLOUD",
-            style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.2.sp),
-            color = c.bucketRang,
-        )
+/** Time-window presets for the filter sheet. Cutoffs are computed live. */
+private enum class TimeRange(val label: String) {
+    ALL("All time"),
+    TODAY("Today"),
+    SEVEN("Last 7 days"),
+    THIRTY("Last 30 days");
+
+    fun cutoffMs(nowMs: Long = System.currentTimeMillis()): Long = when (this) {
+        ALL -> Long.MIN_VALUE
+        TODAY -> LocalDate.now(ZoneId.systemDefault()).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        SEVEN -> nowMs - 7 * 24L * 60 * 60 * 1000
+        THIRTY -> nowMs - 30 * 24L * 60 * 60 * 1000
     }
 }
 
 @Composable
-private fun SearchBar(query: String, onQueryChange: (String) -> Unit) {
+private fun SearchRow(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    filtersActive: Boolean,
+    onOpenFilters: () -> Unit,
+) {
+    val c = LocalWallColors.current
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(
+            Modifier
+                .weight(1f)
+                .clip(CircleShape)
+                .background(c.surface)
+                .padding(horizontal = 16.dp, vertical = 13.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SearchIcon(color = c.textMuted, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(10.dp))
+            Box(Modifier.weight(1f)) {
+                if (query.isEmpty()) {
+                    Text(
+                        "Search notifications, apps...",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = c.textFaint,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                BasicTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = c.text),
+                    cursorBrush = SolidColor(c.accent),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+        Box(
+            Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .background(if (filtersActive) c.accentSoft else c.surface)
+                .border(1.dp, if (filtersActive) c.accent else c.borderSubtle, CircleShape)
+                .clickable(onClick = onOpenFilters),
+            contentAlignment = Alignment.Center,
+        ) {
+            TuneIcon(Modifier.size(20.dp), track = c.textMuted, knob = c.text)
+            if (filtersActive) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(9.dp)
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(c.accent),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FilterDialog(
+    timeRange: TimeRange,
+    onTimeRange: (TimeRange) -> Unit,
+    appFilter: String?,
+    apps: List<Pair<String, Int>>,
+    onApp: (String?) -> Unit,
+    onClearAll: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val c = LocalWallColors.current
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(c.surface)
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Filter", style = MaterialTheme.typography.titleLarge, color = c.title)
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "Clear",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = c.accent,
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .clickable(onClick = onClearAll)
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                )
+            }
+            Text(
+                "TIME RANGE",
+                style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.2.sp),
+                color = c.textMuted,
+            )
+            TimeRange.entries.forEach { range ->
+                FilterOptionRow(
+                    label = range.label,
+                    selected = timeRange == range,
+                    onClick = { onTimeRange(range) },
+                )
+            }
+            Text(
+                "APP",
+                style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.2.sp),
+                color = c.textMuted,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+            LazyColumn(
+                Modifier
+                    .fillMaxWidth()
+                    .height(220.dp),
+            ) {
+                item {
+                    FilterOptionRow(
+                        label = "All apps (${apps.sumOf { it.second }})",
+                        selected = appFilter == null,
+                        onClick = { onApp(null) },
+                    )
+                }
+                items(apps, key = { it.first }) { (label, count) ->
+                    FilterOptionRow(
+                        label = "$label ($count)",
+                        selected = appFilter == label,
+                        onClick = { onApp(label) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FilterOptionRow(label: String, selected: Boolean, onClick: () -> Unit) {
     val c = LocalWallColors.current
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(CircleShape)
-            .background(c.surface)
-            .padding(horizontal = 16.dp, vertical = 13.dp),
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        SearchIcon(color = c.textMuted, modifier = Modifier.size(20.dp))
-        Spacer(Modifier.width(10.dp))
-        Box(Modifier.weight(1f)) {
-            if (query.isEmpty()) {
-                Text(
-                    "Search notifications, apps, rules...",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = c.textFaint,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            BasicTextField(
-                value = query,
-                onValueChange = onQueryChange,
-                singleLine = true,
-                textStyle = MaterialTheme.typography.bodyMedium.copy(color = c.text),
-                cursorBrush = SolidColor(c.accent),
-                modifier = Modifier.fillMaxWidth(),
-            )
+        Text(
+            label,
+            style = MaterialTheme.typography.titleMedium,
+            color = if (selected) c.title else c.textMuted,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (selected) {
+            Text("✓", style = MaterialTheme.typography.titleMedium, color = c.accent)
         }
     }
 }
@@ -361,6 +511,7 @@ private fun outcomePill(row: InboxRow): OutcomePill {
             val tag = when (row.source) {
                 WallDecisionSource.VIP -> "VIP Contact"
                 WallDecisionSource.OTP -> "OTP Fast Path"
+                WallDecisionSource.CALL -> "Live Call"
                 else -> row.importance?.let { "Importance %.1f".format(it) } ?: "Allowed"
             }
             OutcomePill("Rang • $tag", c.bucketRang)
@@ -433,14 +584,40 @@ private fun InboxCard(
                 .clip(RoundedCornerShape(20.dp))
                 .background(if (expanded) c.surfaceElevated else c.surface)
                 .combinedClickable(onClick = onTap, onLongClick = onLongPress)
-                .padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            // Outcome chip row on top, with the time.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    Modifier
+                        .clip(CircleShape)
+                        .background(c.background)
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (row.source == WallDecisionSource.OTP) {
+                        BoltIcon(color = pill.tint, modifier = Modifier.size(12.dp))
+                    } else {
+                        StatusDot(color = pill.tint, size = 6.dp)
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        pill.text,
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
+                        color = pill.tint,
+                        maxLines = 1,
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                Text(inboxTime(row.timestampMs), style = MaterialTheme.typography.labelMedium, color = c.textMuted)
+            }
+
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     Modifier
-                        .size(40.dp)
-                        .clip(RoundedCornerShape(13.dp))
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(12.dp))
                         .background(c.background),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -450,8 +627,8 @@ private fun InboxCard(
                         color = status,
                     )
                 }
-                Spacer(Modifier.width(11.dp))
-                Column(Modifier.weight(1f)) {
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             row.appLabel,
@@ -473,38 +650,15 @@ private fun InboxCard(
                             )
                         }
                     }
+                    val bodyText = row.title ?: row.text
+                    Text(
+                        bodyText ?: "Content expired",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (bodyText == null) c.textFaint else c.text,
+                        maxLines = if (expanded) Int.MAX_VALUE else 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
-                Spacer(Modifier.width(8.dp))
-                Text(inboxTime(row.timestampMs), style = MaterialTheme.typography.labelMedium, color = c.textMuted)
-            }
-
-            val bodyText = row.title ?: row.text
-            Text(
-                bodyText ?: "Content expired",
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (bodyText == null) c.textFaint else c.text,
-                maxLines = if (expanded) Int.MAX_VALUE else 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-
-            Row(
-                Modifier
-                    .clip(CircleShape)
-                    .background(c.background)
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (row.source == WallDecisionSource.OTP) {
-                    BoltIcon(color = pill.tint, modifier = Modifier.size(13.dp))
-                } else {
-                    StatusDot(color = pill.tint, size = 6.dp)
-                }
-                Spacer(Modifier.width(7.dp))
-                Text(
-                    pill.text,
-                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
-                    color = pill.tint,
-                )
             }
 
             if (expanded) {

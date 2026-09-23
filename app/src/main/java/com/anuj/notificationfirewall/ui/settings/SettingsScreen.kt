@@ -193,6 +193,14 @@ fun SettingsScreen(nav: NavHostController, themeViewModel: ThemeViewModel) {
                     onThemeSelect = themeViewModel::setMode,
                     onOpenKeys = { nav.navigate(Routes.KEYS) },
                     onResetLearning = { resetLearningConfirm = true },
+                    onDeleteHistory = { deleteHistoryConfirm = true },
+                )
+            }
+
+            HushSection("Developer tools") {
+                DeveloperToolsCard(
+                    ui = ui,
+                    onEmptyCache = vm::emptyCache,
                     exportIncludeContent = exportIncludeContent,
                     onExportIncludeContentChange = { exportIncludeContent = it },
                     onExport = {
@@ -201,7 +209,6 @@ fun SettingsScreen(nav: NavHostController, themeViewModel: ThemeViewModel) {
                             exportLauncher.launch("notification-wall-export.json")
                         }
                     },
-                    onDeleteHistory = { deleteHistoryConfirm = true },
                 )
             }
 
@@ -811,9 +818,6 @@ private fun MoreControlsCard(
     onThemeSelect: (ThemeMode) -> Unit,
     onOpenKeys: () -> Unit,
     onResetLearning: () -> Unit,
-    exportIncludeContent: Boolean,
-    onExportIncludeContentChange: (Boolean) -> Unit,
-    onExport: () -> Unit,
     onDeleteHistory: () -> Unit,
 ) {
     val c = LocalWallColors.current
@@ -911,29 +915,45 @@ private fun MoreControlsCard(
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp),
+            .height(50.dp)
+            .clip(CircleShape)
+            .background(c.danger)
+            .clickable(onClick = onDeleteHistory)
+            .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
     ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text("Verdict cache", style = MaterialTheme.typography.titleMedium, color = c.title)
-            Text(
-                "${ui.cacheEntryCount} cached verdict(s)",
-                style = MaterialTheme.typography.bodyMedium,
-                color = c.textMuted,
-            )
-        }
         Text(
-            "Empty",
-            style = MaterialTheme.typography.labelMedium,
-            color = c.accent,
-            modifier = Modifier
-                .clip(CircleShape)
-                .clickable(onClick = vm::emptyCache)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+            "Delete all history",
+            style = MaterialTheme.typography.labelLarge.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold),
+            color = c.background,
         )
     }
+}
 
-    Spacer(Modifier.height(6.dp))
+/* ------------------------------------------------------------------ */
+/* Developer tools: verdict cache + decision export for verification   */
+/* ------------------------------------------------------------------ */
+
+@Composable
+private fun DeveloperToolsCard(
+    ui: SettingsUiState,
+    onEmptyCache: () -> Unit,
+    exportIncludeContent: Boolean,
+    onExportIncludeContentChange: (Boolean) -> Unit,
+    onExport: () -> Unit,
+) {
+    val c = LocalWallColors.current
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("Decision export", style = MaterialTheme.typography.titleMedium, color = c.title)
+        Text(
+            "Every notification plus what the wall did — shown, muted, or blocked — and why. " +
+                "Feed the file to another model to check our calls.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = c.textMuted,
+        )
+    }
     Row(
         Modifier
             .fillMaxWidth()
@@ -958,23 +978,31 @@ private fun MoreControlsCard(
         color = c.textMuted,
     )
     Spacer(Modifier.height(8.dp))
-    HushOutlineButton(text = "Export history", onClick = onExport)
-    Spacer(Modifier.height(10.dp))
+    HushOutlineButton(text = "Export decisions", onClick = onExport)
+
+    Spacer(Modifier.height(14.dp))
     Row(
         Modifier
             .fillMaxWidth()
-            .height(50.dp)
-            .clip(CircleShape)
-            .background(c.danger)
-            .clickable(onClick = onDeleteHistory)
-            .padding(horizontal = 16.dp),
+            .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
     ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text("Verdict cache", style = MaterialTheme.typography.titleMedium, color = c.title)
+            Text(
+                "${ui.cacheEntryCount} cached verdict(s)",
+                style = MaterialTheme.typography.bodyMedium,
+                color = c.textMuted,
+            )
+        }
         Text(
-            "Delete all history",
-            style = MaterialTheme.typography.labelLarge.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold),
-            color = c.background,
+            "Empty",
+            style = MaterialTheme.typography.labelMedium,
+            color = c.accent,
+            modifier = Modifier
+                .clip(CircleShape)
+                .clickable(onClick = onEmptyCache)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
         )
     }
 }

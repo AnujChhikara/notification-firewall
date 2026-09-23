@@ -311,4 +311,117 @@ class WallPipelineTest {
         assertTrue(!d.pendingClassification)
         assertNotNull(d.verdict)
     }
+
+    // ── Call fast-path ───────────────────────────────────────────────────
+
+    @Test
+    fun huddleInviteRingsWithoutConsultingJev() = runTest {
+        val d = decide(
+            notification(
+                pkg = "com.Slack",
+                app = "Slack",
+                title = "Anmol Rishi",
+                text = "Anmol Rishi invited you to a huddle",
+                sender = "Anmol Rishi",
+            ),
+        )
+
+        assertEquals(WallBucket.RING, d.bucket)
+        assertEquals(WallDecisionSource.CALL, d.source)
+        assertTrue("Jev must not be called for a live invite", jev.calls.isEmpty())
+    }
+
+    @Test
+    fun blockedSenderStaysBlockedDespiteCallPhrasing() = runTest {
+        // An explicit instruction outranks the heuristic: the call detector
+        // sits below block/VIP on purpose.
+        overrides.add(OverrideKind.BLOCK, "com.Slack", null, "Slack", OverrideSource.MANUAL)
+
+        val d = decide(
+            notification(
+                pkg = "com.Slack",
+                app = "Slack",
+                title = "Anmol Rishi",
+                text = "Anmol Rishi invited you to a huddle",
+                sender = "Anmol Rishi",
+            ),
+        )
+
+        assertEquals(WallBucket.DROP, d.bucket)
+        assertEquals(WallDecisionSource.BLOCK, d.source)
+    }
+
+    // ── Personal-question bar ──────────────────────────────────────────
+
+    @Test
+    fun personalQuestionRingsBelowTheGlobalBar() = runTest {
+        // Verbatim miss from the Sept 2026 sample: 3.44 vs a ~4.05 bar.
+        jev.verdict = verdict(importance = 3.44f, category = NotificationCategory.PERSONAL_MESSAGE)
+
+        val d = decide(
+            notification(
+                pkg = "com.whatsapp",
+                app = "WhatsApp",
+                title = "Anmol Rishi",
+                text = "Can you come to gurgaon?",
+                sender = "Anmol Rishi",
+            ),
+        )
+
+        assertEquals(WallBucket.RING, d.bucket)
+        assertEquals(WallDecisionSource.JEV, d.source)
+    }
+
+    @Test
+    fun personalStatementWithoutQuestionStaysSilent() = runTest {
+        jev.verdict = verdict(importance = 2.97f, category = NotificationCategory.PERSONAL_MESSAGE)
+
+        val d = decide(
+            notification(
+                pkg = "com.whatsapp",
+                app = "WhatsApp",
+                title = "Ayush Neurodrift",
+                text = "Damn, I will need that or build one myself",
+                sender = "Ayush Neurodrift",
+            ),
+        )
+
+        assertEquals(WallBucket.SILENCE, d.bucket)
+    }
+
+    @Test
+    fun groupQuestionDoesNotGetThePersonalBar() = runTest {
+        jev.verdict = verdict(importance = 3.51f, category = NotificationCategory.PERSONAL_MESSAGE)
+
+        val d = decide(
+            notification(
+                pkg = "com.whatsapp",
+                app = "WhatsApp",
+                title = "V-AI x NeuroDrift: ~ Divyam Nigam",
+                text = "done @Kanhaiya Mohan, is this fine?",
+                sender = "~ Divyam Nigam",
+            ),
+        )
+
+        assertEquals(WallBucket.SILENCE, d.bucket)
+    }
+
+    @Test
+    fun personalBarAppliesToCachedVerdictsToo() = runTest {
+        jev.verdict = verdict(importance = 3.05f, category = NotificationCategory.PERSONAL_MESSAGE)
+        val first = notification(
+            pkg = "com.whatsapp",
+            app = "WhatsApp",
+            title = "Ayush Neurodrift",
+            text = "Busy ho aap abhi?",
+            sender = "Ayush Neurodrift",
+        )
+        decide(first)
+        assertEquals(1, jev.calls.size)
+
+        val d = decide(first)
+
+        assertEquals(WallDecisionSource.CACHE, d.source)
+        assertEquals(WallBucket.RING, d.bucket)
+    }
 }

@@ -283,7 +283,12 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { bias.clearAll() }
     }
 
-    suspend fun exportJson(includeContent: Boolean): String = historyExporter.toJson(includeContent)
+    suspend fun exportJson(includeContent: Boolean): String =
+        historyExporter.toJson(
+            includeContent,
+            settings.threshold,
+            com.anuj.notificationfirewall.domain.wall.WallPipeline.PERSONAL_QUESTION_BAR,
+        )
 
     /**
      * Deletes the entire notification history. Irreversible; confirmed by

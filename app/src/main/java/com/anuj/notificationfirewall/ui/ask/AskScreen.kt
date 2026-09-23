@@ -14,9 +14,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -62,6 +65,7 @@ import java.time.ZoneId
 import java.time.format.TextStyle
 import java.util.Locale
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AskScreen(nav: NavHostController) {
     val vm: AskViewModel = hiltViewModel()
@@ -125,8 +129,6 @@ fun AskScreen(nav: NavHostController) {
             item { Spacer(Modifier.height(4.dp)) }
             if (!ui.hasKey) {
                 item { NoKeyCard(onOpenSettings = { nav.navigate(Routes.KEYS) }) }
-            } else if (ui.messages.isEmpty()) {
-                item { EmptyChatHint() }
             }
             items(ui.messages, key = { it.atMs.toString() + it.text.hashCode() }) { message ->
                 MessageTurn(message)
@@ -138,11 +140,15 @@ fun AskScreen(nav: NavHostController) {
         }
 
         // Composer: suggestions (until the first answer), opt-in, input row.
+        // The bottom clearance follows the keyboard: a fixed 100dp would hover
+        // far above an open keyboard, while nothing would leave the composer
+        // hidden behind the floating nav pill when it is closed.
+        val imeVisible = WindowInsets.isImeVisible
         Column(
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
-                .padding(bottom = 100.dp),
+                .padding(bottom = if (imeVisible) 12.dp else 100.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (ui.hasKey && ui.messages.isEmpty()) {
@@ -295,32 +301,6 @@ private fun NoKeyCard(onOpenSettings: () -> Unit) {
             color = c.textMuted,
         )
         NfButton("Add a key in Settings", onClick = onOpenSettings, primary = false)
-    }
-}
-
-@Composable
-private fun EmptyChatHint() {
-    val c = LocalWallColors.current
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(c.surface)
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Text(
-            "Ask anything about the last stretch — totals first, then details.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = c.text,
-        )
-        Text(
-            "Your messages stay here. What is sent is the question, the table and " +
-                "column names, and the counts that come back — which can include app " +
-                "names, but never a title, a body or a sender.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = c.textMuted,
-        )
     }
 }
 

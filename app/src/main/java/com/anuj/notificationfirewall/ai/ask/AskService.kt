@@ -84,6 +84,26 @@ class AskService(
     companion object {
         /** How many queries the agent may run before it must answer. */
         const val MAX_AGENT_QUERIES = 3
+
+        private val DATA_QUESTION_WORDS = listOf(
+            "what", "which", "how", "show", "list", "count", "when", "where",
+            "many", "much", "often", "top", "most", "average", "total",
+            "breakdown", "compare", "trend", "summary", "notification",
+            "notifications", "app", "apps", "sender", "message", "ping",
+        )
+    }
+
+    /**
+     * Whether the question is plausibly about the user's data (and so should
+     * be answered from queries, with one nudge if the model jumps ahead) as
+     * opposed to small talk the model may answer directly. Deliberately
+     * coarse: it only decides whether to spend one extra call nudging.
+     */
+    internal fun questionIsDataSeeking(question: String): Boolean {
+        if ('?' in question) return true
+        return DATA_QUESTION_WORDS.any {
+            "\\b$it\\b".toRegex(RegexOption.IGNORE_CASE).containsMatchIn(question)
+        }
     }
 
     suspend fun ask(question: String, allowContent: Boolean): AskOutcome {
@@ -144,6 +164,7 @@ class AskService(
         val steps = mutableListOf<AgentStep>()
         var lastSql = ""
         var lastResult: QueryResult? = null
+        var nudgedForData = false
         val transcript = StringBuilder("Question: $question")
         val now = System.currentTimeMillis()
 
@@ -162,11 +183,26 @@ class AskService(
 
             val move = AgentMove.parse(raw)
             if (move?.answer != null) {
-                if (steps.isEmpty()) {
-                    // An answer with no evidence is a guess wearing confidence.
-                    return AskOutcome.Failed("The model answered without looking at any data.")
+                // Conversational turns (greetings, "what can you do?") need no
+                // data and are accepted as-is. A data question answered with
+                // nothing queried gets one nudge toward the evidence; the
+                // second dataless answer is accepted rather than failed, so a
+                // stubborn model degrades to a guess instead of an error.
+                if (steps.isEmpty() && questionIsDataSeeking(question) && !nudgedForData) {
+                    nudgedForData = true
+                    transcript.append(
+                        "\n\nThat question is about the user's data, which you have " +
+                            "not queried yet. Reply with a {\"sql\"} object that " +
+                            "gathers the evidence first.",
+                    )
+                    return@repeat
                 }
-                return AskOutcome.Answered(move.answer.trim(), lastSql, lastResult!!, steps.toList())
+                return AskOutcome.Answered(
+                    move.answer.trim(),
+                    lastSql,
+                    lastResult ?: QueryResult(emptyList(), emptyList()),
+                    steps.toList(),
+                )
             }
             val sql = move?.sql
                 ?: return AskOutcome.Failed("The model replied in an unusable format.")
@@ -194,6 +230,8 @@ class AskService(
 
         // Budget spent without an answer: phrase from the gathered evidence
         // rather than inventing one, using the same phrasing contract.
+        val evidence = lastResult
+            ?: return AskOutcome.Failed("The run ended with no usable result.")
         val answer = try {
             openAi.chat(
                 model = model,
@@ -205,6 +243,6 @@ class AskService(
             Log.w(TAG, "Agent phrasing failed", e)
             return AskOutcome.Failed("Could not phrase the answer: ${e.message}")
         }
-        return AskOutcome.Answered(answer.trim(), lastSql, lastResult!!, steps.toList())
+        return AskOutcome.Answered(answer.trim(), lastSql, evidence, steps.toList())
     }
 }

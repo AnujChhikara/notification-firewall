@@ -186,6 +186,8 @@ class InboxViewModel @Inject constructor(
                 "Rang: looks like a one-time code, which always gets through."
             WallDecisionSource.VIP ->
                 "Rang: this sender is on your always-ring list."
+            WallDecisionSource.CALL ->
+                "Rang: looks like a live call or huddle invite, which always gets through."
             WallDecisionSource.BLOCK ->
                 "Dropped: this sender is on your block list."
             WallDecisionSource.PENDING ->
