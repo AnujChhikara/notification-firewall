@@ -45,6 +45,13 @@ android {
         }
     }
 
+    // Robolectric suites run serially by default; with 500+ tests that is
+    // 15+ minutes. Test classes are isolated (in-memory Room, per-test prefs
+    // names), so fork across half the cores to keep a full run under ~5 min.
+    tasks.withType<Test> {
+        maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceAtLeast(2)
+    }
+
     sourceSets {
         getByName("test") {
             assets.srcDirs(files("$projectDir/schemas"))
