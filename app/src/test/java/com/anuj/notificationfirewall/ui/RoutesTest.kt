@@ -7,14 +7,14 @@ import org.junit.Test
 class RoutesTest {
 
     @Test
-    fun exactlyFourPrimaryDestinations() {
-        assertEquals(4, Routes.primary.size)
+    fun exactlyFivePrimaryDestinations() {
+        assertEquals(5, Routes.primary.size)
     }
 
     @Test
-    fun primaryDestinationsAreTheFourTabs() {
+    fun primaryDestinationsAreTheFiveTabs() {
         assertEquals(
-            setOf(Routes.WALL, Routes.INBOX, Routes.ASK, Routes.SETTINGS),
+            setOf(Routes.WALL, Routes.INBOX, Routes.ASK, Routes.INSIGHTS, Routes.SETTINGS),
             Routes.primary,
         )
     }
